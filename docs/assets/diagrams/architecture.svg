@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420">
+  <defs>
+    <style>
+      .title{font:700 18px system-ui,Segoe UI,Arial;fill:#111}
+      .label{font:600 13px system-ui,Segoe UI,Arial;fill:#111}
+      .text{font:400 12px system-ui,Segoe UI,Arial;fill:#111}
+      .box{fill:#fff;stroke:#222;stroke-width:2;rx:12;ry:12}
+      .muted{fill:#555}
+      .arrow{stroke:#222;stroke-width:2;fill:none;marker-end:url(#m)}
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#222"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" class="title">BARAM architecture (high level)</text>
+
+  <!-- Apps -->
+  <rect x="40" y="70" width="260" height="120" class="box"/>
+  <text x="60" y="102" class="label">BaramMesh</text>
+  <text x="60" y="128" class="text muted">GUI: mesh creation/import/export</text>
+
+  <rect x="40" y="220" width="260" height="120" class="box"/>
+  <text x="60" y="252" class="label">BaramFlow</text>
+  <text x="60" y="278" class="text muted">GUI: case setup / run / post</text>
+
+  <!-- Shared libs -->
+  <rect x="360" y="130" width="260" height="150" class="box"/>
+  <text x="380" y="162" class="label">Shared libraries</text>
+  <text x="380" y="188" class="text">libbaram/ (process, mpi, utils)</text>
+  <text x="380" y="210" class="text">widgets/ (shared Qt widgets)</text>
+  <text x="380" y="232" class="text">resources/ (icons, qss, translations)</text>
+
+  <!-- Integrations -->
+  <rect x="680" y="90" width="260" height="120" class="box"/>
+  <text x="700" y="122" class="label">OpenFOAM integration</text>
+  <text x="700" y="148" class="text">openfoam/ tools &amp; dictionaries</text>
+  <text x="700" y="170" class="text">solver execution + parsing</text>
+
+  <rect x="680" y="240" width="260" height="120" class="box"/>
+  <text x="700" y="272" class="label">Data &amp; configuration</text>
+  <text x="700" y="298" class="text">coredb/ (schemas, migration)</text>
+  <text x="700" y="320" class="text">project files (.bf/.bm)</text>
+
+  <!-- Arrows -->
+  <path d="M300 130 C330 130, 330 170, 360 170" class="arrow"/>
+  <path d="M300 280 C330 280, 330 240, 360 240" class="arrow"/>
+
+  <path d="M620 170 C650 170, 650 140, 680 140" class="arrow"/>
+  <path d="M620 240 C650 240, 650 290, 680 290" class="arrow"/>
+</svg>

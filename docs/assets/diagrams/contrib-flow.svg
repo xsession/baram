@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="260" viewBox="0 0 980 260">
+  <defs>
+    <style>
+      .title{font:700 18px system-ui,Segoe UI,Arial;fill:#111}
+      .label{font:600 13px system-ui,Segoe UI,Arial;fill:#111}
+      .text{font:400 12px system-ui,Segoe UI,Arial;fill:#111}
+      .box{fill:#fff;stroke:#222;stroke-width:2;rx:12;ry:12}
+      .arrow{stroke:#222;stroke-width:2;fill:none;marker-end:url(#m)}
+      .muted{fill:#555}
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#222"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" class="title">Contribution flow</text>
+
+  <rect x="40" y="90" width="200" height="90" class="box"/>
+  <text x="60" y="122" class="label">Pick an issue</text>
+  <text x="60" y="146" class="text muted">bug / docs / packaging</text>
+
+  <rect x="280" y="90" width="200" height="90" class="box"/>
+  <text x="300" y="122" class="label">Make change</text>
+  <text x="300" y="146" class="text muted">small &amp; focused</text>
+
+  <rect x="520" y="90" width="200" height="90" class="box"/>
+  <text x="540" y="122" class="label">Sanity checks</text>
+  <text x="540" y="146" class="text muted">compileall / smoke run</text>
+
+  <rect x="760" y="90" width="180" height="90" class="box"/>
+  <text x="780" y="122" class="label">Open PR/MR</text>
+  <text x="780" y="146" class="text muted">describe + screenshots</text>
+
+  <path d="M240 135 L280 135" class="arrow"/>
+  <path d="M480 135 L520 135" class="arrow"/>
+  <path d="M720 135 L760 135" class="arrow"/>
+</svg>

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360">
+  <defs>
+    <style>
+      .title{font:700 18px system-ui,Segoe UI,Arial;fill:#111}
+      .label{font:600 13px system-ui,Segoe UI,Arial;fill:#111}
+      .text{font:400 12px system-ui,Segoe UI,Arial;fill:#111}
+      .box{fill:#fff;stroke:#222;stroke-width:2;rx:12;ry:12}
+      .arrow{stroke:#222;stroke-width:2;fill:none;marker-end:url(#m)}
+      .muted{fill:#555}
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#222"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" class="title">Data paths (config and project state)</text>
+
+  <rect x="40" y="80" width="260" height="110" class="box"/>
+  <text x="60" y="114" class="label">UI actions</text>
+  <text x="60" y="140" class="text muted">widgets / dialogs / views</text>
+
+  <rect x="350" y="80" width="280" height="110" class="box"/>
+  <text x="370" y="114" class="label">coredb</text>
+  <text x="370" y="140" class="text muted">schemas + migrations + persistence</text>
+
+  <rect x="680" y="80" width="260" height="110" class="box"/>
+  <text x="700" y="114" class="label">Project directory</text>
+  <text x="700" y="140" class="text muted">case files, dictionaries, outputs</text>
+
+  <rect x="350" y="220" width="280" height="100" class="box"/>
+  <text x="370" y="252" class="label">External tools</text>
+  <text x="370" y="278" class="text muted">OpenFOAM executables, converters</text>
+
+  <path d="M300 135 L350 135" class="arrow"/>
+  <path d="M630 135 L680 135" class="arrow"/>
+  <path d="M490 190 L490 220" class="arrow"/>
+  <path d="M630 270 C700 270, 700 190, 680 165" class="arrow"/>
+</svg>

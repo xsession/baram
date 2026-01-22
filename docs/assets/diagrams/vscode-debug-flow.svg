@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="320" viewBox="0 0 980 320">
+  <defs>
+    <style>
+      .title{font:700 18px system-ui,Segoe UI,Arial;fill:#111}
+      .label{font:600 13px system-ui,Segoe UI,Arial;fill:#111}
+      .text{font:400 12px system-ui,Segoe UI,Arial;fill:#111}
+      .box{fill:#fff;stroke:#222;stroke-width:2;rx:12;ry:12}
+      .arrow{stroke:#222;stroke-width:2;fill:none;marker-end:url(#m)}
+      .muted{fill:#555}
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#222"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" class="title">VS Code run/debug flow</text>
+
+  <rect x="40" y="80" width="240" height="90" class="box"/>
+  <text x="60" y="112" class="label">Select interpreter</text>
+  <text x="60" y="138" class="text muted">VS Code Python extension</text>
+
+  <rect x="320" y="80" width="250" height="90" class="box"/>
+  <text x="340" y="112" class="label">Run task or debug</text>
+  <text x="340" y="138" class="text muted">.vscode/tasks.json / launch.json</text>
+
+  <rect x="610" y="80" width="310" height="90" class="box"/>
+  <text x="630" y="112" class="label">App starts</text>
+  <text x="630" y="138" class="text muted">cwd = workspaceFolder</text>
+
+  <rect x="320" y="200" width="600" height="80" class="box"/>
+  <text x="340" y="232" class="label">Troubleshooting loop</text>
+  <text x="340" y="256" class="text muted">logs → breakpoints → inspect → fix → rerun</text>
+
+  <path d="M280 125 L320 125" class="arrow"/>
+  <path d="M570 125 L610 125" class="arrow"/>
+  <path d="M765 170 L765 200" class="arrow"/>
+</svg>

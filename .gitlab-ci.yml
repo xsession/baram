@@ -1,0 +1,110 @@
+stages:
+  - package
+  - binaries
+  - release
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+    - when: never
+
+package:
+  stage: package
+  image: python:3.11-slim
+  script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends git ca-certificates gzip
+    - VERSION="$CI_COMMIT_TAG"
+    - git archive --format=zip --prefix="baram-${VERSION}/" -o "baram-${VERSION}-windows.zip" "$VERSION"
+    - git archive --format=tar --prefix="baram-${VERSION}/" "$VERSION" | gzip -9 > "baram-${VERSION}-linux.tar.gz"
+    - git archive --format=tar --prefix="baram-${VERSION}/" "$VERSION" | gzip -9 > "baram-${VERSION}-macos.tar.gz"
+    - python - <<'PY'
+      import hashlib
+      import pathlib
+
+      files = sorted(pathlib.Path('.').glob('baram-*.*'))
+      lines = []
+      for p in files:
+          if p.suffix in {'.gz', '.zip'}:
+              h = hashlib.sha256(p.read_bytes()).hexdigest()
+              lines.append(f"{h}  {p.name}")
+      pathlib.Path('SHA256SUMS').write_text("\n".join(lines) + "\n", encoding='utf-8')
+      PY
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - baram-*.zip
+      - baram-*.tar.gz
+      - SHA256SUMS
+
+binaries:linux:
+  stage: binaries
+  image: python:3.11-slim
+  script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends git ca-certificates
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt -r requirements-build.txt
+    - python tools/make_binary_release.py --version "$CI_COMMIT_TAG" --clean
+    - cp dist/baram-$CI_COMMIT_TAG-linux-binaries.zip .
+    - cp dist/SHA256SUMS-binaries-linux .
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - baram-*-linux-binaries.zip
+      - SHA256SUMS-binaries-linux
+
+binaries:windows:
+  stage: binaries
+  tags: ["windows"]
+  script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt -r requirements-build.txt
+    - python tools\make_binary_release.py --version "$env:CI_COMMIT_TAG" --clean
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - dist/baram-*-windows-binaries.zip
+      - dist/SHA256SUMS-binaries-windows
+
+binaries:macos:
+  stage: binaries
+  tags: ["macos"]
+  script:
+    - python3 -m pip install --upgrade pip
+    - pip3 install -r requirements.txt -r requirements-build.txt
+    - python3 tools/make_binary_release.py --version "$CI_COMMIT_TAG" --clean
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - dist/baram-*-macos-binaries.zip
+      - dist/SHA256SUMS-binaries-macos
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: ["package"]
+  script:
+    - echo "Creating GitLab release for $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: $CI_COMMIT_TAG
+    description: "Automated release for $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "Windows (zip)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/baram-$CI_COMMIT_TAG-windows.zip?job=package"
+        - name: "Linux (tar.gz)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/baram-$CI_COMMIT_TAG-linux.tar.gz?job=package"
+        - name: "macOS (tar.gz)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/baram-$CI_COMMIT_TAG-macos.tar.gz?job=package"
+        - name: "SHA256SUMS"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/SHA256SUMS?job=package"
+        - name: "Linux binaries (zip)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/baram-$CI_COMMIT_TAG-linux-binaries.zip?job=binaries:linux"
+        - name: "Linux binaries SHA256"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/SHA256SUMS-binaries-linux?job=binaries:linux"
+        - name: "Windows binaries (zip)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/dist/baram-$CI_COMMIT_TAG-windows-binaries.zip?job=binaries:windows"
+        - name: "macOS binaries (zip)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/dist/baram-$CI_COMMIT_TAG-macos-binaries.zip?job=binaries:macos"

@@ -1,0 +1,150 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "releaseVersion",
+      "type": "promptString",
+      "description": "Git ref/version to package (e.g. v1.2.3 or HEAD)",
+      "default": "HEAD"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "Setup: dev venv + deps",
+      "type": "shell",
+      "command": "${workspaceFolder}/bootstrap-dev.ps1",
+      "problemMatcher": [],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\bootstrap-dev.ps1"
+        ]
+      },
+      "linux": {
+        "command": "bash",
+        "args": ["${workspaceFolder}/bootstrap-dev.sh"]
+      },
+      "osx": {
+        "command": "bash",
+        "args": ["${workspaceFolder}/bootstrap-dev.sh"]
+      }
+    },
+    {
+      "label": "Generate: Qt resources (convertUi)",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": ["${workspaceFolder}/convertUi.py"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "windows": {
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "PATH": "${workspaceFolder}\\venv\\Scripts;${env:PATH}"
+          }
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Setup: build deps (PyInstaller)",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "${workspaceFolder}/requirements-build.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Prep: binaries (deps + Qt)",
+      "type": "shell",
+      "command": "echo",
+      "args": ["prep"],
+      "dependsOn": [
+        "Setup: build deps (PyInstaller)",
+        "Generate: Qt resources (convertUi)"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: baramFlow",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "baramFlow.main"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": ["Generate: Qt resources (convertUi)"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: baramMesh",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "baramMesh.main"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": ["Generate: Qt resources (convertUi)"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: local archives",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "${workspaceFolder}/tools/make_release.py",
+        "--version",
+        "${input:releaseVersion}",
+        "--out",
+        "dist"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build: binaries (PyInstaller)",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "${workspaceFolder}/tools/build_binaries.py",
+        "--clean"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": ["Prep: binaries (deps + Qt)"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: local binaries (zip)",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "${workspaceFolder}/tools/make_binary_release.py",
+        "--version",
+        "${input:releaseVersion}",
+        "--clean"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": ["Prep: binaries (deps + Qt)"],
+      "problemMatcher": []
+    }
+  ]
+}

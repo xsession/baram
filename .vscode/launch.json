@@ -3,18 +3,56 @@
     // Hover to view descriptions of existing attributes.
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
+    "inputs": [
+        {
+            "id": "releaseVersion",
+            "type": "promptString",
+            "description": "Git tag/ref for binaries (e.g. v1.2.3)",
+            "default": "v1.2.3"
+        }
+    ],
     "configurations": [
         {
             "name": "baramFlow",
             "type": "debugpy",
             "request": "launch",
-            "module": "baramFlow.main"
+            "module": "baramFlow.main",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Generate: Qt resources (convertUi)"
         },
         {
             "name": "baramMesh",
             "type": "debugpy",
             "request": "launch",
-            "module": "baramMesh.main"
+            "module": "baramMesh.main",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Generate: Qt resources (convertUi)"
+        },
+        {
+            "name": "Binaries: Build (PyInstaller)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tools/build_binaries.py",
+            "args": [
+                "--clean"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Prep: binaries (deps + Qt)"
+        },
+        {
+            "name": "Binaries: Package zip (make_binary_release)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tools/make_binary_release.py",
+            "args": [
+                "--version",
+                "${input:releaseVersion}",
+                "--clean"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Prep: binaries (deps + Qt)"
         }
     ]
 }

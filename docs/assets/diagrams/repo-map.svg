@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+  <defs>
+    <style>
+      .title{font:700 18px system-ui,Segoe UI,Arial;fill:#111}
+      .label{font:700 13px system-ui,Segoe UI,Arial;fill:#111}
+      .text{font:400 12px system-ui,Segoe UI,Arial;fill:#111}
+      .box{fill:#fff;stroke:#222;stroke-width:2;rx:12;ry:12}
+      .arrow{stroke:#222;stroke-width:2;fill:none;marker-end:url(#m)}
+      .muted{fill:#555}
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#222"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" class="title">Repository map (what lives where)</text>
+
+  <rect x="40" y="70" width="290" height="170" class="box"/>
+  <text x="60" y="102" class="label">Apps</text>
+  <text x="60" y="130" class="text">baramFlow/</text>
+  <text x="60" y="152" class="text">baramMesh/</text>
+  <text x="60" y="184" class="text muted">Entry points: `python -m baramFlow.main` / `baramMesh.main`</text>
+
+  <rect x="40" y="270" width="290" height="190" class="box"/>
+  <text x="60" y="302" class="label">Shared</text>
+  <text x="60" y="330" class="text">libbaram/ (shared logic)</text>
+  <text x="60" y="352" class="text">widgets/ (UI widgets)</text>
+  <text x="60" y="374" class="text">resources/ (icons/qss/translations)</text>
+
+  <rect x="370" y="70" width="270" height="170" class="box"/>
+  <text x="390" y="102" class="label">Build &amp; packaging</text>
+  <text x="390" y="130" class="text">convertUi.py (generates *_ui.py, resource_rc.py)</text>
+  <text x="390" y="152" class="text">packaging/pyinstaller/*.spec</text>
+  <text x="390" y="174" class="text">tools/build_binaries.py</text>
+  <text x="390" y="196" class="text">tools/make_binary_release.py</text>
+
+  <rect x="370" y="270" width="270" height="190" class="box"/>
+  <text x="390" y="302" class="label">CI &amp; releases</text>
+  <text x="390" y="330" class="text">.github/workflows/release.yml</text>
+  <text x="390" y="352" class="text">.gitlab-ci.yml</text>
+  <text x="390" y="384" class="text muted">Triggered on tags like v1.2.3</text>
+
+  <rect x="680" y="150" width="260" height="190" class="box"/>
+  <text x="700" y="182" class="label">Vendored / misc</text>
+  <text x="700" y="210" class="text">PyFoam/ (legacy Python 2 bits inside)</text>
+  <text x="700" y="232" class="text">misc/ (C helpers)</text>
+
+  <path d="M330 155 C350 155, 350 155, 370 155" class="arrow"/>
+  <path d="M330 365 C350 365, 350 365, 370 365" class="arrow"/>
+  <path d="M640 155 C660 155, 660 200, 680 200" class="arrow"/>
+</svg>

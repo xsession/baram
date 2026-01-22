@@ -1,0 +1,37 @@
+site_name: BARAM Docs
+repo_url: https://github.com/xsession/baram
+repo_name: xsession/baram
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User:
+      - Overview: user/overview.md
+      - Tutorial: user/tutorials.md
+      - How-to: user/howto.md
+      - Explanations: user/explanations.md
+      - Reference: user/reference.md
+  - Developer:
+      - Overview: developer/overview.md
+      - Architecture: developer/architecture.md
+      - Run & Debug: developer/run-debug.md
+      - Build & Release: developer/build-release.md
+      - Packaging: developer/packaging.md
+  - Contributor:
+      - Contributing: contributor/contributing.md
+      - Dev Setup: contributor/dev-setup.md
+      - Code Style: contributor/code-style.md
+      - Testing: contributor/testing.md
+      - Release Process: contributor/release-process.md

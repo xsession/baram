@@ -145,3 +145,7 @@ dmypy.json
 
 # Solver
 solvers/
+
+.tmp_qtads/
+
+dist-binaries/

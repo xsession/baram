@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="260" viewBox="0 0 980 260">
+  <defs>
+    <style>
+      .title{font:700 18px system-ui,Segoe UI,Arial;fill:#111}
+      .label{font:600 13px system-ui,Segoe UI,Arial;fill:#111}
+      .text{font:400 12px system-ui,Segoe UI,Arial;fill:#111}
+      .box{fill:#fff;stroke:#222;stroke-width:2;rx:12;ry:12}
+      .arrow{stroke:#222;stroke-width:2;fill:none;marker-end:url(#m)}
+      .muted{fill:#555}
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#222"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" class="title">Runtime flow (typical)</text>
+
+  <rect x="40" y="80" width="200" height="90" class="box"/>
+  <text x="60" y="114" class="label">Start app</text>
+  <text x="60" y="138" class="text muted">baramMesh or baramFlow</text>
+
+  <rect x="280" y="80" width="200" height="90" class="box"/>
+  <text x="300" y="114" class="label">Load project</text>
+  <text x="300" y="138" class="text muted">.bm / .bf</text>
+
+  <rect x="520" y="80" width="200" height="90" class="box"/>
+  <text x="540" y="114" class="label">Edit &amp; validate</text>
+  <text x="540" y="138" class="text muted">UI + coredb</text>
+
+  <rect x="760" y="80" width="180" height="90" class="box"/>
+  <text x="780" y="114" class="label">Run tools</text>
+  <text x="780" y="138" class="text muted">OpenFOAM / exporters</text>
+
+  <path d="M240 125 L280 125" class="arrow"/>
+  <path d="M480 125 L520 125" class="arrow"/>
+  <path d="M720 125 L760 125" class="arrow"/>
+</svg>
