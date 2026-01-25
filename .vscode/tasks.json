@@ -42,6 +42,8 @@
         "cwd": "${workspaceFolder}"
       },
       "windows": {
+        "command": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+        "args": ["${workspaceFolder}\\convertUi.py"],
         "options": {
           "cwd": "${workspaceFolder}",
           "env": {

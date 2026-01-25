@@ -9,6 +9,8 @@ import psutil
 from pathlib import Path
 import asyncio
 
+from typing import Mapping, Optional, Sequence, Tuple
+
 from libbaram.mpi import ParallelEnvironment
 
 from libbaram.app_path import APP_PATH
@@ -105,15 +107,32 @@ else:
     MPI_OPTIONS = ['-x', 'WM_PROJECT_DIR', '-x', LIBRARY_PATH_NAME]
 
 
-def openSolverProcess(cmd, casePath):
+def merged_env(extra_env: Optional[Mapping[str, object]]) -> dict:
+    if not extra_env:
+        return ENV
+
+    merged = ENV.copy()
+    for key, value in extra_env.items():
+        if key is None:
+            continue
+        merged[str(key)] = '' if value is None else str(value)
+
+    return merged
+
+
+def openSolverProcess(cmd, casePath, extra_env: Optional[Mapping[str, object]] = None):
     stdout = open(casePath / STDOUT_FILE_NAME, 'w')
     stderr = open(casePath / STDERR_FILE_NAME, 'w')
 
-    p = subprocess.Popen(cmd,
-                         env=ENV, cwd=casePath,
-                         stdout=stdout, stderr=stderr,
-                         creationflags=creationflags,
-                         startupinfo=startupinfo)
+    p = subprocess.Popen(
+        cmd,
+        env=merged_env(extra_env),
+        cwd=casePath,
+        stdout=stdout,
+        stderr=stderr,
+        creationflags=creationflags,
+        startupinfo=startupinfo,
+    )
 
     stdout.close()
     stderr.close()
@@ -121,19 +140,75 @@ def openSolverProcess(cmd, casePath):
     return p
 
 
-def launchSolverOnWindow(solver: str, casePath: Path, parallel: ParallelEnvironment) -> (int, float):
+def openExternalProcess(cmd, casePath: Path, extra_env: Optional[Mapping[str, object]] = None):
+    stdout = open(casePath / STDOUT_FILE_NAME, 'w')
+    stderr = open(casePath / STDERR_FILE_NAME, 'w')
+
+    p = subprocess.Popen(
+        cmd,
+        env=merged_env(extra_env),
+        cwd=casePath,
+        stdout=stdout,
+        stderr=stderr,
+        creationflags=creationflags,
+        startupinfo=startupinfo,
+    )
+
+    stdout.close()
+    stderr.close()
+
+    return p
+
+
+async def runExternalCommand(
+    cmd: Sequence[str],
+    casePath: Path,
+    extra_env: Optional[Mapping[str, object]] = None,
+):
+    stdout = open(casePath / STDOUT_FILE_NAME, 'w')
+    stderr = open(casePath / STDERR_FILE_NAME, 'w')
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            env=merged_env(extra_env),
+            cwd=casePath,
+            creationflags=creationflags,
+            startupinfo=startupinfo,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    finally:
+        stdout.close()
+        stderr.close()
+
+    return proc
+
+
+def launchSolverOnWindow(
+    solver: str,
+    casePath: Path,
+    parallel: ParallelEnvironment,
+    extra_env: Optional[Mapping[str, object]] = None,
+) -> Tuple[int, float]:
     process = openSolverProcess(
-        parallel.makeCommand(OPENFOAM / 'bin' / solver, cwd=casePath, options=MPI_OPTIONS), casePath)
+        parallel.makeCommand(OPENFOAM / 'bin' / solver, cwd=casePath, options=MPI_OPTIONS), casePath, extra_env=extra_env)
 
     ps = psutil.Process(pid=process.pid)
     return ps.pid, ps.create_time()
 
 
-def launchSolverOnLinux(solver: str, casePath: Path, uuid, parallel: ParallelEnvironment) -> (int, float):
+def launchSolverOnLinux(
+    solver: str,
+    casePath: Path,
+    uuid,
+    parallel: ParallelEnvironment,
+    extra_env: Optional[Mapping[str, object]] = None,
+) -> Tuple[int, float]:
     args = [OPENFOAM/'bin'/'baramd', '-project', uuid, '-cmdline']
     args.extend(parallel.makeCommand(OPENFOAM / 'bin' / solver, cwd=casePath, options=MPI_OPTIONS))
 
-    process = openSolverProcess(args, casePath)
+    process = openSolverProcess(args, casePath, extra_env=extra_env)
     process.wait()
 
     processes = [p for p in psutil.process_iter(['pid', 'cmdline', 'create_time'])
@@ -145,7 +220,13 @@ def launchSolverOnLinux(solver: str, casePath: Path, uuid, parallel: ParallelEnv
     return None
 
 
-def launchSolver(solver: str, casePath: Path, uuid, parallel: ParallelEnvironment) -> (int, float):
+def launchSolver(
+    solver: str,
+    casePath: Path,
+    uuid,
+    parallel: ParallelEnvironment,
+    extra_env: Optional[Mapping[str, object]] = None,
+) -> Tuple[int, float]:
     """Launch solver
 
     Launch solver in case folder
@@ -170,9 +251,9 @@ def launchSolver(solver: str, casePath: Path, uuid, parallel: ParallelEnvironmen
         raise AssertionError
 
     if platform.system() == 'Windows':
-        return launchSolverOnWindow(solver, casePath, parallel)
+        return launchSolverOnWindow(solver, casePath, parallel, extra_env=extra_env)
     else:
-        return launchSolverOnLinux(solver, casePath, uuid, parallel)
+        return launchSolverOnLinux(solver, casePath, uuid, parallel, extra_env=extra_env)
 
 
 async def runUtility(program: str, *args, cwd=None, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL):
@@ -227,7 +308,8 @@ class RunUtility(RunSubprocess):
 
 
 async def runParallelUtility(program: str, *args, parallel: ParallelEnvironment, cwd: Path = None,
-                             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL):
+                             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                             extra_env: Optional[Mapping[str, object]] = None):
     global creationflags
     global startupinfo
 
@@ -240,7 +322,7 @@ async def runParallelUtility(program: str, *args, parallel: ParallelEnvironment,
 
     proc = await asyncio.create_subprocess_exec(
         *parallel.makeCommand(OPENFOAM / 'bin' / program, *args, cwd=cwd, options=MPI_OPTIONS),
-        env=ENV, cwd=cwd, creationflags=creationflags, startupinfo=startupinfo, stdout=stdout, stderr=stderr)
+        env=merged_env(extra_env), cwd=cwd, creationflags=creationflags, startupinfo=startupinfo, stdout=stdout, stderr=stderr)
 
     return proc
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QVBoxLayout, QApplication
 from PySide6.QtCore import Signal, QEvent, QMargins, Qt
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6QtAds import CDockManager, DockWidgetArea
 
 from libbaram.simple_db.simple_schema import ValidationError
@@ -20,6 +21,7 @@ from widgets.async_message_box import AsyncMessageBox
 from widgets.new_project_dialog import NewProjectDialog
 from widgets.parallel.parallel_environment_dialog import ParallelEnvironmentDialog
 from widgets.progress_dialog import ProgressDialog
+from libbaram.qt_utils import apply_dark_mode_stylesheet
 
 from baramMesh.app import app
 from baramMesh.openfoam.redistribution_task import RedistributionTask
@@ -48,6 +50,28 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ui = Ui_MainWindow()
         self._ui.setupUi(self)
+
+        self._themeActionGroup = QActionGroup(self)
+        self._themeActionGroup.setExclusive(True)
+
+        self._actionLightMode = QAction(self)
+        self._actionLightMode.setCheckable(True)
+        self._actionLightMode.triggered.connect(self._toggleLightMode)
+        self._actionLightMode.setActionGroup(self._themeActionGroup)
+        self._ui.menuSettings.addAction(self._actionLightMode)
+
+        self._actionDarkMode = QAction(self)
+        self._actionDarkMode.setCheckable(True)
+        self._actionDarkMode.triggered.connect(self._toggleDarkMode)
+        self._actionDarkMode.setActionGroup(self._themeActionGroup)
+        self._ui.menuSettings.addAction(self._actionDarkMode)
+
+        if app.settings.isDarkModeEnabled():
+            self._actionDarkMode.setChecked(True)
+        else:
+            self._actionLightMode.setChecked(True)
+
+        self._retranslateUi()
 
         self._ui.renderingSplitter.setStretchFactor(0, 0)
         self._ui.renderingSplitter.setStretchFactor(1, 1)
@@ -132,8 +156,28 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.Type.LanguageChange:
             self._ui.retranslateUi(self)
             self._stepManager.retranslatePages()
+            self._retranslateUi()
 
         super().changeEvent(event)
+
+    def _retranslateUi(self):
+        self._actionLightMode.setText(QApplication.translate('MainWindow', '&Light Mode'))
+        self._actionDarkMode.setText(QApplication.translate('MainWindow', '&Dark Mode'))
+
+    def _setTheme(self, dark_mode: bool):
+        app.settings.setDarkModeEnabled(dark_mode)
+        apply_dark_mode_stylesheet(QApplication.instance(), dark_mode)
+
+        if hasattr(self, '_renderingTool') and self._renderingTool is not None:
+            self._renderingTool.applyThemeDefaults(dark_mode)
+
+    def _toggleLightMode(self, checked: bool):
+        if checked:
+            self._setTheme(False)
+
+    def _toggleDarkMode(self, checked: bool):
+        if checked:
+            self._setTheme(True)
 
     async def start(self):
         self._startDialog.setRecents(app.settings.getRecentProjects())

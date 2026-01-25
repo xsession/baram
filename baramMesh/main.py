@@ -8,6 +8,7 @@ import sys
 
 import qasync
 from PySide6.QtWidgets import QApplication, QMessageBox
+from libbaram.qt_utils import apply_dark_mode_stylesheet
 
 # To render SVG files.
 # noinspection PyUnresolvedReferences
@@ -88,6 +89,8 @@ def main():
     loop.set_exception_handler(loop_exception)
 
     app.applyLanguage()
+
+    apply_dark_mode_stylesheet(application, app.settings.isDarkModeEnabled())
 
     app.window = MainWindow()
 

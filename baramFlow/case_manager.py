@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import asyncio
 from threading import Lock
 
 from PySide6.QtCore import Signal, QTimer, QObject
@@ -9,10 +10,13 @@ from baramFlow.base.graphic.graphics_db import GraphicsDB
 from baramFlow.openfoam.openfoam_reader import OpenFOAMReader
 from libbaram.utils import rmtree
 from libbaram.openfoam.constants import CASE_DIRECTORY_NAME
-from libbaram.run import launchSolver, runParallelUtility, STDOUT_FILE_NAME, STDERR_FILE_NAME
+import psutil
+
+from libbaram.run import launchSolver, openExternalProcess, runExternalCommand, runParallelUtility, STDOUT_FILE_NAME, STDERR_FILE_NAME
 
 from .coredb import coredb
 from .coredb.project import Project
+from .coredb.app_settings import AppSettings
 from .coredb.coredb_reader import CoreDBReader
 from .coredb.filedb import FileDB
 from .openfoam import parallel
@@ -137,7 +141,27 @@ class LiveCase(Case):
             if not skipCaseGeneration:
                 await self._generateCase()
 
-            process = launchSolver(findSolver(), self._path, self._project.uuid, parallel.getEnvironment())
+            extra_env = dict(AppSettings.getSolverEnv())
+            opencl_devices = AppSettings.getOpenCLDevices().strip()
+            if opencl_devices:
+                extra_env.setdefault('BARAM_OPENCL_DEVICES', opencl_devices)
+
+            if AppSettings.getCalculationBackend() == 'external':
+                cmd = AppSettings.getExternalSolverCommand()
+                if not cmd:
+                    raise RuntimeError('External solver command is not configured')
+
+                process = openExternalProcess(cmd, self._path, extra_env=extra_env)
+                self._setProcess(SolverProcess(process.pid, psutil.Process(process.pid).create_time()))
+                return
+
+            process = launchSolver(
+                findSolver(),
+                self._path,
+                self._project.uuid,
+                parallel.getEnvironment(),
+                extra_env=extra_env,
+            )
             if process:
                 self._setProcess(SolverProcess(*process))
             else:
@@ -211,11 +235,34 @@ class BatchCase(Case):
 
             await self._generateCase()
 
+            extra_env = dict(AppSettings.getSolverEnv())
+            opencl_devices = AppSettings.getOpenCLDevices().strip()
+            if opencl_devices:
+                extra_env.setdefault('BARAM_OPENCL_DEVICES', opencl_devices)
+
+            if AppSettings.getCalculationBackend() == 'external':
+                cmd = AppSettings.getExternalSolverCommand()
+                if not cmd:
+                    raise RuntimeError('External solver command is not configured')
+
+                self._process = await runExternalCommand(cmd, self._path, extra_env=extra_env)
+                self._setStatus(SolverStatus.RUNNING)
+                returncode = await self._process.wait()
+                self._process = None
+                self._setStatus(SolverStatus.ENDED if returncode == 0 else SolverStatus.ERROR)
+                return
+
             stdout = open(self._path / STDOUT_FILE_NAME, 'w')
             stderr = open(self._path / STDERR_FILE_NAME, 'w')
 
-            self._process = await runParallelUtility(findSolver(), parallel=parallel.getEnvironment(), cwd=self._path,
-                                                     stdout=stdout, stderr=stderr)
+            self._process = await runParallelUtility(
+                findSolver(),
+                parallel=parallel.getEnvironment(),
+                cwd=self._path,
+                stdout=stdout,
+                stderr=stderr,
+                extra_env=extra_env,
+            )
             self._setStatus(SolverStatus.RUNNING)
             returncode = await self._process.wait()
             self._process = None

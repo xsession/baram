@@ -6102,4 +6102,15 @@ Laskenta pysähtyy mahdollisimman pian</translation>
         <translation>Turbulenttisen viskositeetin suhde</translation>
     </message>
 </context>
+<context>
+    <name>MainWindow</name>
+    <message>
+        <source>&amp;Dark Mode</source>
+        <translation>&amp;Tumma tila</translation>
+    </message>
+    <message>
+        <source>&amp;Light Mode</source>
+        <translation>&amp;Vaalea tila</translation>
+    </message>
+</context>
 </TS>

@@ -17298,4 +17298,15 @@ Parameter name should be prefixed with a dollar sign ($) when it is used.</sourc
         <translation>난류 점도 비율</translation>
     </message>
 </context>
+<context>
+    <name>MainWindow</name>
+    <message>
+        <source>&amp;Dark Mode</source>
+        <translation>다크 모드(&amp;D)</translation>
+    </message>
+    <message>
+        <source>&amp;Light Mode</source>
+        <translation>라이트 모드(&amp;L)</translation>
+    </message>
+</context>
 </TS>

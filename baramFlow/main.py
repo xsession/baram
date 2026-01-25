@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import qasync
-from PySide6.QtCore import QFile, QTextStream, QIODevice
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 # To render SVG files.
@@ -30,6 +29,7 @@ from baramFlow.app_plug_in import AppPlugIn
 from baramFlow.base.graphic.color_scheme import initializeBaramPresetColorSchemes
 from baramFlow.view.main_window.start_window import Baram
 from baramFlow.coredb.app_settings import AppSettings
+from libbaram.qt_utils import apply_dark_mode_stylesheet
 
 logger = logging.getLogger()
 formatter = logging.Formatter("[%(asctime)s][%(name)s] ==> %(message)s")
@@ -102,11 +102,7 @@ def main():
 
     loop.set_exception_handler(loop_exception)
 
-    file = QFile(u":/ElegantDark.qss")
-    file.open(QIODevice.ReadOnly | QIODevice.Text)
-    stream = QTextStream(file)
-
-    #app.setStyleSheet(app.styleSheet() + '\n' + stream.readAll())
+    apply_dark_mode_stylesheet(application, AppSettings.isDarkModeEnabled())
 
     initializeBaramPresetColorSchemes()
 

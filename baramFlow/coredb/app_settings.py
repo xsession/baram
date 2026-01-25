@@ -25,6 +25,11 @@ THERMOS_FILE_NAME = 'thermos.csv'
 class SettingKey(Enum):
     FORMAT_VERSION = 'format_version'
     UI_SCALING = 'ui_scaling'
+    DARK_MODE = 'dark_mode'
+    SOLVER_ENV = 'solver_env'
+    CALCULATION_BACKEND = 'calculation_backend'
+    EXTERNAL_SOLVER_COMMAND = 'external_solver_command'
+    OPENCL_DEVICES = 'opencl_devices'
     LOCALE = 'default_language'
     RECENT_DIRECTORY = 'recent_directory'
     RECENT_CASES = 'recent_cases'
@@ -143,6 +148,60 @@ class AppSettings:
     def updateUiScaling(cls, scaling):
         settings = cls._load()
         settings[SettingKey.UI_SCALING.value] = scaling
+        cls._save(settings)
+
+    @classmethod
+    def isDarkModeEnabled(cls) -> bool:
+        return bool(cls._get(SettingKey.DARK_MODE, False))
+
+    @classmethod
+    def setDarkModeEnabled(cls, enabled: bool):
+        settings = cls._load()
+        settings[SettingKey.DARK_MODE.value] = bool(enabled)
+        cls._save(settings)
+
+    @classmethod
+    def getSolverEnv(cls) -> dict:
+        value = cls._get(SettingKey.SOLVER_ENV, {})
+        return value if isinstance(value, dict) else {}
+
+    @classmethod
+    def setSolverEnv(cls, env: dict):
+        settings = cls._load()
+        settings[SettingKey.SOLVER_ENV.value] = env if isinstance(env, dict) else {}
+        cls._save(settings)
+
+    @classmethod
+    def getCalculationBackend(cls) -> str:
+        backend = cls._get(SettingKey.CALCULATION_BACKEND, 'openfoam')
+        return backend if backend in ('openfoam', 'external') else 'openfoam'
+
+    @classmethod
+    def setCalculationBackend(cls, backend: str):
+        settings = cls._load()
+        settings[SettingKey.CALCULATION_BACKEND.value] = backend if backend in ('openfoam', 'external') else 'openfoam'
+        cls._save(settings)
+
+    @classmethod
+    def getExternalSolverCommand(cls) -> list:
+        value = cls._get(SettingKey.EXTERNAL_SOLVER_COMMAND, [])
+        return value if isinstance(value, list) else []
+
+    @classmethod
+    def setExternalSolverCommand(cls, cmd: list):
+        settings = cls._load()
+        settings[SettingKey.EXTERNAL_SOLVER_COMMAND.value] = cmd if isinstance(cmd, list) else []
+        cls._save(settings)
+
+    @classmethod
+    def getOpenCLDevices(cls) -> str:
+        value = cls._get(SettingKey.OPENCL_DEVICES, '')
+        return str(value) if value is not None else ''
+
+    @classmethod
+    def setOpenCLDevices(cls, devices: str):
+        settings = cls._load()
+        settings[SettingKey.OPENCL_DEVICES.value] = str(devices) if devices is not None else ''
         cls._save(settings)
 
     # Territory is not considered for now

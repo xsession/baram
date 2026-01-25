@@ -17,6 +17,7 @@ RECENT_PROJECTS_NUMBER = 100
 class SettingKey(Enum):
     FORMAT_VERSION = 'format_version'
     SCALE = 'display_scale'
+    DARK_MODE = 'dark_mode'
     LOCALE = 'default_language'
     RECENT_DIRECTORY = 'recent_directory'
     RECENT_CASES = 'recent_cases'
@@ -119,6 +120,12 @@ class AppSettings:
 
     def setScale(self, scale):
         return self._set(SettingKey.SCALE, scale)
+
+    def isDarkModeEnabled(self) -> bool:
+        return bool(self._get(SettingKey.DARK_MODE, False))
+
+    def setDarkModeEnabled(self, enabled: bool) -> bool:
+        return self._set(SettingKey.DARK_MODE, bool(enabled))
 
     # Territory is not considered for now
     def getLocale(self) -> QLocale:

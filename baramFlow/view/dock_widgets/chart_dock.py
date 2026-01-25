@@ -52,8 +52,6 @@ class ChartView(QWidget):
         layout.setContentsMargins(QMargins(40, 40, 40, 40))
         layout.addWidget(self._chart)
 
-        self.setStyleSheet('background-color: white')
-
     def _connectSignalsSlots(self):
         self._solverInfoManager.residualsUpdated.connect(self._updated)
         self._solverInfoManager.flushed.connect(self._flushed)

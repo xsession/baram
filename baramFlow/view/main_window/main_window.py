@@ -11,12 +11,13 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from uuid import UUID
 
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup
 import qasync
 import asyncio
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox
 from PySide6.QtCore import QCoreApplication, Qt, QEvent, QTimer
+from PySide6.QtWidgets import QApplication
 
 from baramFlow.base import expert_mode
 from baramFlow.base.graphic.graphics_db import GraphicsDB
@@ -26,6 +27,7 @@ from baramFlow.view.results.graphics.graphic_dock import GraphicDock
 from libbaram.exception import CanceledException
 from libbaram.openfoam.polymesh import removeVoidBoundaries
 from libbaram.run import hasUtility, openTerminal
+from libbaram.qt_utils import apply_dark_mode_stylesheet
 from libbaram.utils import getFit
 from widgets.async_message_box import AsyncMessageBox
 from widgets.new_project_dialog import NewProjectDialog
@@ -176,11 +178,16 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
 
         self._dialog = None
         self._actionTerminal = None
+        self._themeActionGroup = None
+        self._actionLightMode = None
+        self._actionDarkMode = None
         self._closeState = CloseState.NONE
 
         self._backgroundTasks = set()
 
         self._setupShortcuts()
+
+        self._setupThemeMenu()
 
         self._connectSignalsSlots()
 
@@ -193,6 +200,51 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
         self._ui.splitter.setStretchFactor(2, 1)
 
         self._docks: dict[UUID, GraphicDock] = {}
+
+    def _setupThemeMenu(self):
+        self._themeActionGroup = QActionGroup(self)
+        self._themeActionGroup.setExclusive(True)
+
+        self._actionLightMode = QAction(self)
+        self._actionLightMode.setCheckable(True)
+        self._actionLightMode.triggered.connect(self._toggleLightMode)
+        self._actionLightMode.setActionGroup(self._themeActionGroup)
+        self._ui.menuSetting.addAction(self._actionLightMode)
+
+        self._actionDarkMode = QAction(self)
+        self._actionDarkMode.setCheckable(True)
+        self._actionDarkMode.triggered.connect(self._toggleDarkMode)
+        self._actionDarkMode.setActionGroup(self._themeActionGroup)
+        self._ui.menuSetting.addAction(self._actionDarkMode)
+
+        # Initialize checked state from settings.
+        if AppSettings.isDarkModeEnabled():
+            self._actionDarkMode.setChecked(True)
+        else:
+            self._actionLightMode.setChecked(True)
+
+        self._retranslateUi()
+
+    def _setTheme(self, dark_mode: bool):
+        AppSettings.setDarkModeEnabled(dark_mode)
+        apply_dark_mode_stylesheet(QApplication.instance(), dark_mode)
+
+        try:
+            rendering_view = self.renderingView()
+            if hasattr(rendering_view, '_applyThemeDefaults'):
+                rendering_view._applyThemeDefaults(dark_mode)
+                rendering_view.refresh()
+        except Exception:
+            # Rendering view might not be initialized yet; ignore.
+            pass
+
+    def _toggleLightMode(self, checked: bool):
+        if checked:
+            self._setTheme(False)
+
+    def _toggleDarkMode(self, checked: bool):
+        if checked:
+            self._setTheme(True)
 
     def consoleView(self):
         return self._consoleDock.widget()
@@ -981,3 +1033,9 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
     def _retranslateUi(self):
         if self._actionTerminal is not None:
             self._actionTerminal.setText(QCoreApplication.translate("MainWindow", u"&Terminal", None))
+
+        if self._actionLightMode is not None:
+            self._actionLightMode.setText(QCoreApplication.translate("MainWindow", u"&Light Mode", None))
+
+        if self._actionDarkMode is not None:
+            self._actionDarkMode.setText(QCoreApplication.translate("MainWindow", u"&Dark Mode", None))

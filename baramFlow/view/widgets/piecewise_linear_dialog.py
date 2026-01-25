@@ -3,11 +3,13 @@
 
 from typing import Optional
 
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 import pyqtgraph as pg
 
 from .piecewise_linear_dialog_ui import Ui_PiecewiseLinearDialog
+from baramFlow.coredb.app_settings import AppSettings
 
 
 COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', "#1f1b24", '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
@@ -24,16 +26,34 @@ class PiecewiseLinearDialog(QDialog):
         dataLabel  = f'{", ".join(dataNames)} ({dataUnit})' if dataUnit else f'{", ".join(dataNames)}'
 
         plotWidget = self._ui.plotWidget
-        plotWidget.setTitle(chartTitle, color='#5f5f5f', size='12pt')
+        dark_mode = AppSettings.isDarkModeEnabled()
+        palette = QApplication.instance().palette() if QApplication.instance() is not None else None
+
+        if dark_mode:
+            # Generated UI forces white; clear it so palette/QSS can take effect.
+            self._ui.widget_1.setStyleSheet('')
+
+        title_color = '#5f5f5f'
+        if dark_mode and palette is not None:
+            title_color = palette.color(QPalette.Text).name()
+
+        plotWidget.setTitle(chartTitle, color=title_color, size='12pt')
         plotWidget.setLabel('bottom', indexLabel)
         plotWidget.setLabel('left', dataLabel)
         plotWidget.showGrid(x=True, y=True)
-        plotWidget.setBackground('w')
+
+        if dark_mode and palette is not None:
+            plotWidget.setBackground(palette.color(QPalette.Base))
+        else:
+            plotWidget.setBackground('w')
         plotWidget.setMinimumHeight(150)
 
         plotItem: pg.PlotItem = plotWidget.getPlotItem()
-        plotItem.getAxis('left').setTextPen('#5f5f5f')
-        plotItem.getAxis('bottom').setTextPen('#5f5f5f')
+        axis_pen = '#5f5f5f'
+        if dark_mode and palette is not None:
+            axis_pen = palette.color(QPalette.Text).name()
+        plotItem.getAxis('left').setTextPen(axis_pen)
+        plotItem.getAxis('bottom').setTextPen(axis_pen)
 
         self._plotDataItems: list[pg.PlotDataItem] = []
         for i in range(len(dataNames)):
