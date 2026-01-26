@@ -30,6 +30,7 @@ class SettingKey(Enum):
     CALCULATION_BACKEND = 'calculation_backend'
     EXTERNAL_SOLVER_COMMAND = 'external_solver_command'
     OPENCL_DEVICES = 'opencl_devices'
+    OPENFOAM_SOLVER_OVERRIDES = 'openfoam_solver_overrides'
     LOCALE = 'default_language'
     RECENT_DIRECTORY = 'recent_directory'
     RECENT_CASES = 'recent_cases'
@@ -203,6 +204,35 @@ class AppSettings:
         settings = cls._load()
         settings[SettingKey.OPENCL_DEVICES.value] = str(devices) if devices is not None else ''
         cls._save(settings)
+
+    @classmethod
+    def getOpenFOAMSolverOverrides(cls) -> dict:
+        value = cls._get(SettingKey.OPENFOAM_SOLVER_OVERRIDES, {})
+        return value if isinstance(value, dict) else {}
+
+    @classmethod
+    def setOpenFOAMSolverOverrides(cls, overrides: dict):
+        settings = cls._load()
+        settings[SettingKey.OPENFOAM_SOLVER_OVERRIDES.value] = overrides if isinstance(overrides, dict) else {}
+        cls._save(settings)
+
+    @classmethod
+    def resolveOpenFOAMSolver(cls, solver: str) -> str:
+        """Map a canonical OpenFOAM solver name to an overridden executable name.
+
+        This is intended for using custom OpenFOAM builds/forks where solvers are
+        shipped under different names (e.g. GPU/OpenCL-enabled variants).
+        """
+        if not solver:
+            return solver
+
+        overrides = cls.getOpenFOAMSolverOverrides()
+        mapped = overrides.get(solver)
+        if mapped is None:
+            return solver
+
+        mapped = str(mapped).strip()
+        return mapped if mapped else solver
 
     # Territory is not considered for now
     @classmethod

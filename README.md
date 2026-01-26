@@ -1,4 +1,76 @@
 ## BARAM
+
+## OpenCL (v2512) heterogeneous backend
+
+Important: upstream OpenFOAM solvers are C++ CPU solvers; “refactoring OpenFOAM solvers to OpenCL” generally means using a separate GPU/OpenCL-enabled fork/solver implementation. BaramFlow can:
+- generate standard OpenFOAM cases,
+- choose which solver executable to launch, and
+- pass environment variables/device selections to that solver.
+
+BaramFlow can run calculations via either:
+- the bundled OpenFOAM backend (`calculation_backend: openfoam`, default), or
+- an external solver backend (`calculation_backend: external`).
+
+If you want to keep using OpenFOAM case setup but run a custom solver binary (for example, an OpenCL/GPU-enabled OpenFOAM fork that ships different executable names), configure `openfoam_solver_overrides`.
+
+Example `~/.BaramFlow/baram.cfg.yaml`:
+
+```yaml
+calculation_backend: openfoam
+
+openfoam_solver_overrides:
+	buoyantSimpleNFoam: buoyantSimpleNFoamOpenCL
+	buoyantPimpleNFoam: buoyantPimpleNFoamOpenCL
+
+opencl_devices: "0,1,2"
+solver_env:
+	# Optional: map Baram's device string to env vars your fork expects
+	OPENCL_DEVICES: "{BARAM_OPENCL_DEVICES}"
+```
+
+For **CPU+iGPU+dGPU** heterogeneous compute, the **external solver** must implement multi-device OpenCL itself (FluidX3D-style). BaramFlow will pass your device selection to the external solver via environment variables.
+
+### 1) List OpenCL devices
+
+```powershell
+\.\venv\Scripts\python.exe .\tools\opencl_info.py
+```
+
+### 1b) Try to detect your solver's CLI
+
+If you don’t know which flags your external solver uses for device selection:
+
+```powershell
+\.\venv\Scripts\python.exe .\tools\detect_external_solver_cli.py -- C:\\Path\\To\\YourOpenCLSolver.exe
+```
+
+### 2) Configure BaramFlow
+
+Edit `~/.BaramFlow/baram.cfg.yaml` and add:
+
+```yaml
+calculation_backend: external
+external_solver_command:
+	- C:\\Path\\To\\YourOpenCLSolver.exe
+	# You can use placeholders in args:
+	# {BARAM_CASE_PATH}, {BARAM_PROJECT_UUID}, {BARAM_RUN_MODE}, {BARAM_OPENCL_DEVICES}
+	- --case={BARAM_CASE_PATH}
+	- --devices={BARAM_OPENCL_DEVICES}
+opencl_devices: "0,1,2"  # external solver decides what this means
+solver_env:
+	# Optional extra knobs your solver expects
+	# BARAM_OPENCL_DEVICES: "0,1,2"  # overrides opencl_devices if set
+```
+
+### 3) Dry-run the wiring
+
+You can validate that Baram passes env vars/logs correctly by setting:
+
+```yaml
+external_solver_command:
+	- C:\\GIT\\baram\\venv\\Scripts\\python.exe
+	- C:\\GIT\\baram\\tools\\external_backend_echo.py
+```
 *BARAM* is a Free Open Source Computational Fluid Dynamics (CFD) software package.
 *BARAM* is developed to mitigate the steep learning curve of Text-based Solvers.
 *BARAM* helps you focus on a problem itself with intuitive graphical user interface.

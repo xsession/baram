@@ -19,7 +19,7 @@ from baramFlow.openfoam.function_objects.collateral_fields import foMachNumberRe
 from baramFlow.openfoam.function_objects.collateral_fields import foVorticityReport, foWallHeatFluxReport
 from baramFlow.openfoam.function_objects.collateral_fields import foWallShearStressReport, foWallYPlusReport
 from baramFlow.openfoam.function_objects.collateral_fields import foCelsiusTemperatureReport
-from baramFlow.openfoam.solver import findSolver
+from baramFlow.openfoam.solver import findSolverExecutable
 
 
 def collateralFieldDict(fields: list[Field]) -> dict:
@@ -79,7 +79,7 @@ async def _calculateAgeField(times: list[str] = None):
     foDict.write()
 
     caseRoot = FileSystem.caseRoot()
-    solver = findSolver()
+    solver = findSolverExecutable()
     dictRelativePath = Path(os.path.relpath(foDict.fullPath(), caseRoot)).as_posix()  # "as_posix()": OpenFOAM cannot handle double backward slash separators in parallel processing
 
     if times is None:
@@ -117,7 +117,7 @@ async def calculateCollateralField(fields: list[Field], times: list[str] = None)
     foDict.write()
 
     caseRoot = FileSystem.caseRoot()
-    solver = findSolver()
+    solver = findSolverExecutable()
     dictRelativePath = Path(os.path.relpath(foDict.fullPath(), caseRoot)).as_posix()  # "as_posix()": OpenFOAM cannot handle double backward slash separators in parallel processing
 
     if times is None:

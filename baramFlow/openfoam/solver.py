@@ -64,6 +64,18 @@ def findSolver():
         return 'buoyantSimpleNFoam'
 
 
+def findSolverExecutable() -> str:
+    """Return the solver executable name to run.
+
+    By default this is the canonical solver name from `findSolver()`, but it can
+    be overridden via `openfoam_solver_overrides` in BaramFlow settings.
+    """
+    # Local import to avoid any heavy imports during module load.
+    from baramFlow.coredb.app_settings import AppSettings
+
+    return AppSettings.resolveOpenFOAMSolver(findSolver())
+
+
 def usePrgh() -> bool:
     if GeneralDB.isDensityBased():
         return False

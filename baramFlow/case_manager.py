@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import asyncio
 from threading import Lock
 
 from PySide6.QtCore import Signal, QTimer, QObject
@@ -10,9 +9,11 @@ from baramFlow.base.graphic.graphics_db import GraphicsDB
 from baramFlow.openfoam.openfoam_reader import OpenFOAMReader
 from libbaram.utils import rmtree
 from libbaram.openfoam.constants import CASE_DIRECTORY_NAME
-import psutil
 
-from libbaram.run import launchSolver, openExternalProcess, runExternalCommand, runParallelUtility, STDOUT_FILE_NAME, STDERR_FILE_NAME
+from libbaram.run import runParallelUtility, STDOUT_FILE_NAME, STDERR_FILE_NAME
+
+from baramFlow.backends.base import BackendContext
+from baramFlow.backends.factory import get_backend
 
 from .coredb import coredb
 from .coredb.project import Project
@@ -146,26 +147,31 @@ class LiveCase(Case):
             if opencl_devices:
                 extra_env.setdefault('BARAM_OPENCL_DEVICES', opencl_devices)
 
-            if AppSettings.getCalculationBackend() == 'external':
-                cmd = AppSettings.getExternalSolverCommand()
-                if not cmd:
-                    raise RuntimeError('External solver command is not configured')
+            # Always provide some stable context to backends.
+            extra_env.setdefault('BARAM_CASE_PATH', str(self._path))
+            extra_env.setdefault('BARAM_PROJECT_UUID', str(self._project.uuid))
+            extra_env.setdefault('BARAM_RUN_MODE', 'live')
 
-                process = openExternalProcess(cmd, self._path, extra_env=extra_env)
-                self._setProcess(SolverProcess(process.pid, psutil.Process(process.pid).create_time()))
-                return
+            # Allow solver_env to reference stable context keys.
+            # Example: OPENCL_DEVICES: "{BARAM_OPENCL_DEVICES}"
+            for key, value in list(extra_env.items()):
+                if not isinstance(value, str) or '{' not in value:
+                    continue
+                try:
+                    extra_env[key] = value.format_map(extra_env)
+                except Exception:
+                    pass
 
-            process = launchSolver(
-                findSolver(),
-                self._path,
-                self._project.uuid,
-                parallel.getEnvironment(),
-                extra_env=extra_env,
+            backend = get_backend()
+            pid, create_time = backend.launch_live(
+                BackendContext(
+                    case_path=self._path,
+                    project_uuid=str(self._project.uuid),
+                    parallel=parallel.getEnvironment(),
+                    extra_env=extra_env,
+                )
             )
-            if process:
-                self._setProcess(SolverProcess(*process))
-            else:
-                raise RuntimeError
+            self._setProcess(SolverProcess(pid, create_time))
         except Exception as e:
             self._setStatus(SolverStatus.ERROR)
             raise e
@@ -240,33 +246,29 @@ class BatchCase(Case):
             if opencl_devices:
                 extra_env.setdefault('BARAM_OPENCL_DEVICES', opencl_devices)
 
-            if AppSettings.getCalculationBackend() == 'external':
-                cmd = AppSettings.getExternalSolverCommand()
-                if not cmd:
-                    raise RuntimeError('External solver command is not configured')
+            extra_env.setdefault('BARAM_CASE_PATH', str(self._path))
+            extra_env.setdefault('BARAM_PROJECT_UUID', str(self._project.uuid))
+            extra_env.setdefault('BARAM_RUN_MODE', 'batch')
 
-                self._process = await runExternalCommand(cmd, self._path, extra_env=extra_env)
-                self._setStatus(SolverStatus.RUNNING)
-                returncode = await self._process.wait()
-                self._process = None
-                self._setStatus(SolverStatus.ENDED if returncode == 0 else SolverStatus.ERROR)
-                return
+            for key, value in list(extra_env.items()):
+                if not isinstance(value, str) or '{' not in value:
+                    continue
+                try:
+                    extra_env[key] = value.format_map(extra_env)
+                except Exception:
+                    pass
 
-            stdout = open(self._path / STDOUT_FILE_NAME, 'w')
-            stderr = open(self._path / STDERR_FILE_NAME, 'w')
-
-            self._process = await runParallelUtility(
-                findSolver(),
-                parallel=parallel.getEnvironment(),
-                cwd=self._path,
-                stdout=stdout,
-                stderr=stderr,
-                extra_env=extra_env,
+            backend = get_backend()
+                # self._setStatus(SolverStatus.RUNNING)  # Avoid duplicate RUNNING set
+            returncode = await backend.run_batch(
+                BackendContext(
+                    case_path=self._path,
+                    project_uuid=str(self._project.uuid),
+                    parallel=parallel.getEnvironment(),
+                    extra_env=extra_env,
+                )
             )
-            self._setStatus(SolverStatus.RUNNING)
-            returncode = await self._process.wait()
-            self._process = None
-
+                # self._setStatus(SolverStatus.RUNNING)  # Avoid duplicate RUNNING set
             self._setStatus(SolverStatus.ENDED if returncode == 0 else SolverStatus.ERROR)
         except Exception as e:
             self._setStatus(SolverStatus.ERROR)

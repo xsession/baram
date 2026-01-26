@@ -22,7 +22,7 @@ from baramFlow.openfoam.function_objects import FoDict
 from baramFlow.openfoam.function_objects.force_coeffs import foForceCoeffsReport
 from baramFlow.openfoam.function_objects.forces import foForcesReport
 from baramFlow.openfoam.post_processing.post_file_reader import readPostFile
-from baramFlow.openfoam.solver import findSolver
+from baramFlow.openfoam.solver import findSolverExecutable
 from baramFlow.view.widgets.region_objects_selector import BoundariesSelector
 
 from libbaram import utils
@@ -150,7 +150,7 @@ class ForceReportDialog(QDialog):
         foDict.write()
 
         caseRoot = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dictRelativePath = Path(os.path.relpath(foDict.fullPath(),
                                                 caseRoot)).as_posix()  # "as_posix()": OpenFOAM cannot handle double backward slash separators in parallel processing
         proc = await runParallelUtility(solver, '-postProcess', '-latestTime', '-dict', str(dictRelativePath),

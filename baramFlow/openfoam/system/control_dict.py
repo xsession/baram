@@ -39,7 +39,7 @@ from baramFlow.openfoam.function_objects.patch_probes import foPatchProbesMonito
 from baramFlow.openfoam.function_objects.probes import foProbesMonitor
 from baramFlow.openfoam.function_objects.surface_field_value import SurfaceReportType, foSurfaceFieldValueMonitor
 from baramFlow.openfoam.function_objects.vol_field_value import VolumeReportType, VolumeType, foVolFieldValueMonitor
-from baramFlow.openfoam.solver import findSolver, usePrgh
+from baramFlow.openfoam.solver import findSolverExecutable, usePrgh
 
 from .fv_options import generateSourceTermField, generateFixedValueField
 
@@ -204,7 +204,7 @@ class ControlDict(DictionaryFile):
             purgeWrite = self._db.getValue(xpath + '/maximumNumberOfDataFiles')
 
         self._data = {
-            'application': findSolver(),
+                'application': findSolverExecutable(),
             'startFrom': 'latestTime',
             'startTime': 0,
             'stopAt': 'endTime',

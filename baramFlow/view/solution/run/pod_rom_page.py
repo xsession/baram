@@ -40,7 +40,7 @@ from baramFlow.openfoam.function_objects import FoDict
 from baramFlow.openfoam.function_objects.components import foComponentsReport
 from baramFlow.openfoam.function_objects.force_coeffs import foForceCoeffsReport
 from baramFlow.openfoam.post_processing.post_file_reader import readPostFile
-from baramFlow.openfoam.solver import findSolver
+from baramFlow.openfoam.solver import findSolverExecutable
 
 from baramFlow.openfoam.function_objects.probes import foProbesReport
 from baramFlow.openfoam.function_objects.patch_probes import foPatchProbesReport
@@ -558,7 +558,7 @@ class PODROMPage(ContentPage):
         foDict.write()
 
         caseRoot = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dictRelativePath = Path(os.path.relpath(foDict.fullPath(), caseRoot)).as_posix()
 
         proc = await runParallelUtility(
@@ -653,7 +653,7 @@ class PODROMPage(ContentPage):
         fo_dict.write()
 
         case_root = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dict_rel_path = Path(os.path.relpath(fo_dict.fullPath(), case_root)).as_posix()
 
         try:
@@ -755,7 +755,7 @@ class PODROMPage(ContentPage):
         fo_dict.write()
 
         case_root = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dict_rel_path = Path(os.path.relpath(fo_dict.fullPath(), case_root)).as_posix()
 
         try:
@@ -856,7 +856,7 @@ class PODROMPage(ContentPage):
         fo_dict.write()
 
         case_root = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dict_rel_path = Path(os.path.relpath(fo_dict.fullPath(), case_root)).as_posix()
 
         try:

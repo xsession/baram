@@ -36,12 +36,12 @@ from baramFlow.openfoam.function_objects.mag import foMagReport
 from baramFlow.openfoam.function_objects.patch_probes import foPatchProbesReport
 from baramFlow.openfoam.function_objects.probes import foProbesReport
 from baramFlow.openfoam.post_processing.post_file_reader import readPostFile
-from baramFlow.openfoam.solver import findSolver
+from baramFlow.openfoam.solver import findSolverExecutable
 from baramFlow.view.widgets.post_field_selector import loadFieldsComboBox, connectFieldsToComponents
 from .point_report_dialog_ui import Ui_PointReportDialog
 
 
-def _getRegionForPoint(coordinate: [float, float, float]) -> Optional[str]:
+def _getRegionForPoint(coordinate: tuple[float, float, float]) -> Optional[str]:
     for rname in coredb.CoreDB().getRegions():
         if isPointInDataSet(coordinate, app.internalMeshActor(rname).dataSet):
             return rname
@@ -209,7 +209,7 @@ class PointReportDialog(QDialog):
         foDict.write()
 
         caseRoot = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dictRelativePath = Path(os.path.relpath(foDict.fullPath(), caseRoot)).as_posix()  # "as_posix()": OpenFOAM cannot handle double backward slash separators in parallel processing
         proc = await runParallelUtility(solver, '-postProcess', '-latestTime', '-dict', str(dictRelativePath), parallel=parallel.getEnvironment(), cwd=caseRoot)
 

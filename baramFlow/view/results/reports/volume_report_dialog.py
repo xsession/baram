@@ -30,7 +30,7 @@ from baramFlow.openfoam.function_objects.mag import foMagReport
 from baramFlow.openfoam.function_objects.read_fields import foReadFieldsReport
 from baramFlow.openfoam.function_objects.vol_field_value import VolumeReportType, VolumeType, foVolFieldValueReport
 from baramFlow.openfoam.post_processing.post_file_reader import readPostFile
-from baramFlow.openfoam.solver import findSolver
+from baramFlow.openfoam.solver import findSolverExecutable
 from baramFlow.openfoam.solver_field import getSolverComponentName, getSolverFieldName
 from baramFlow.view.widgets.post_field_selector import loadFieldsComboBox, connectFieldsToComponents
 from .volume_report_dialog_ui import Ui_VolumeReportDialog
@@ -147,7 +147,7 @@ class VolumeReportDialog(QDialog):
         foDict.write()
 
         caseRoot = FileSystem.caseRoot()
-        solver = findSolver()
+        solver = findSolverExecutable()
         dictRelativePath = Path(os.path.relpath(foDict.fullPath(), caseRoot)).as_posix()  # "as_posix()": OpenFOAM cannot handle double backward slash separators in parallel processing
         proc = await runParallelUtility(solver, '-postProcess', '-latestTime', '-dict', str(dictRelativePath), parallel=parallel.getEnvironment(), cwd=caseRoot)
 
