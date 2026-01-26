@@ -16,4 +16,4 @@ superqt==0.7.7
 tables==3.10.2; python_version >= "3.11"
 tables==3.10.1; python_version < "3.11"
 vtk==9.5.2
-xmlschema==1.10.0
+xmlschema==4.3.1

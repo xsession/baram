@@ -3,10 +3,9 @@
 
 import platform
 
-from libbaram.app_path import APP_PATH
+from libbaram.run import OPENFOAM
 
-
-_basePath = APP_PATH.joinpath('solvers', 'openfoam', 'lib')
+_basePath = OPENFOAM.joinpath('lib')
 if platform.system() == 'Windows':
     _libExt = '.dll'
 elif platform.system() == 'Darwin':

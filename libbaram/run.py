@@ -34,7 +34,37 @@ from libbaram.process import RunSubprocess
 
 # MPICMD = 'mpirun'
 
-OPENFOAM = APP_PATH / 'solvers' / 'openfoam'
+def _openfoam_root() -> Path:
+    """Return OpenFOAM root directory.
+
+    Dev checkouts often don't include the packaged solver tree under
+    <APP_PATH>/solvers/openfoam. Allow pointing to an external install.
+
+    Supported env vars:
+    - BARAM_OPENFOAM_DIR: OpenFOAM root directory containing bin/lib/etc
+    - BARAM_OPENFOAM_BIN: directory containing solver executables (bin). If set,
+      the root is inferred as its parent.
+    """
+    of_dir = os.environ.get('BARAM_OPENFOAM_DIR', '').strip().strip('"')
+    if of_dir:
+        return Path(of_dir)
+
+    of_bin = os.environ.get('BARAM_OPENFOAM_BIN', '').strip().strip('"')
+    if of_bin:
+        return Path(of_bin).parent
+
+    return APP_PATH / 'solvers' / 'openfoam'
+
+
+OPENFOAM = _openfoam_root()
+
+
+def _openfoam_bin() -> Path:
+    of_bin = os.environ.get('BARAM_OPENFOAM_BIN', '').strip().strip('"')
+    return Path(of_bin) if of_bin else (OPENFOAM / 'bin')
+
+
+OPENFOAM_BIN = _openfoam_bin()
 
 creationflags = 0
 startupinfo = None
@@ -267,7 +297,16 @@ async def runUtility(program: str, *args, cwd=None, stdout=asyncio.subprocess.DE
             wShowWindow=subprocess.SW_HIDE
         )
 
-    proc = await asyncio.create_subprocess_exec(OPENFOAM/'bin'/program, *args,
+    exe = OPENFOAM_BIN / program
+    if platform.system() == 'Windows' and exe.suffix.lower() != '.exe':
+        exe = exe.with_suffix('.exe')
+    if not exe.is_file():
+        raise FileNotFoundError(
+            f"OpenFOAM executable not found: {exe}. "
+            f"Set BARAM_OPENFOAM_BIN to your OpenFOAM bin directory (or BARAM_OPENFOAM_DIR to the root)."
+        )
+
+    proc = await asyncio.create_subprocess_exec(exe, *args,
                                                 env=ENV, cwd=cwd,
                                                 creationflags=creationflags,
                                                 startupinfo=startupinfo,
@@ -294,8 +333,17 @@ class RunUtility(RunSubprocess):
                 wShowWindow=subprocess.SW_HIDE
             )
 
+        exe = OPENFOAM_BIN / self._program
+        if platform.system() == 'Windows' and exe.suffix.lower() != '.exe':
+            exe = exe.with_suffix('.exe')
+        if not exe.is_file():
+            raise FileNotFoundError(
+                f"OpenFOAM executable not found: {exe}. "
+                f"Set BARAM_OPENFOAM_BIN to your OpenFOAM bin directory (or BARAM_OPENFOAM_DIR to the root)."
+            )
+
         if self._parallel is None:
-            self._proc = await asyncio.create_subprocess_exec(OPENFOAM/'bin'/self._program, *self._args,
+            self._proc = await asyncio.create_subprocess_exec(exe, *self._args,
                                                               env=ENV, cwd=self._cwd,
                                                               creationflags=creationflags,
                                                               startupinfo=startupinfo,
@@ -303,7 +351,7 @@ class RunUtility(RunSubprocess):
                                                               stderr=asyncio.subprocess.PIPE)
         else:
             self._proc = await asyncio.create_subprocess_exec(
-                *self._parallel.makeCommand(OPENFOAM / 'bin' / self._program, *self._args, cwd=self._cwd, options=MPI_OPTIONS),
+                *self._parallel.makeCommand(exe, *self._args, cwd=self._cwd, options=MPI_OPTIONS),
                 env=ENV, cwd=self._cwd, creationflags=creationflags, startupinfo=startupinfo, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
 
@@ -328,7 +376,10 @@ async def runParallelUtility(program: str, *args, parallel: ParallelEnvironment,
 
 
 def hasUtility(program: str):
-    return (OPENFOAM / 'bin' / program).is_file()
+    exe = OPENFOAM_BIN / program
+    if platform.system() == 'Windows' and exe.suffix.lower() != '.exe':
+        exe = exe.with_suffix('.exe')
+    return exe.is_file()
 
 
 class OpenFOAMError(Exception):
@@ -343,7 +394,7 @@ class RunParallelUtility(RunUtility):
 async def openTerminal(cwd: Path):
     env = ENV.copy()
     paths = env['PATH'].split(os.pathsep)
-    paths.append(str(OPENFOAM/'bin'))
+    paths.append(str(OPENFOAM_BIN))
 
     if 'VIRTUAL_ENV' in env:
         vpath = env['VIRTUAL_ENV']

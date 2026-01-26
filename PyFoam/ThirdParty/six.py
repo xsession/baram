@@ -316,6 +316,11 @@ _MovedItems._moved_attributes = _moved_attributes
 moves = _MovedItems(__name__ + ".moves")
 _importer._add_module(moves, "moves")
 
+# Python 3.12+ no longer relies on legacy PEP 302 meta-path importers
+# (find_module/load_module) for submodule discovery. Ensure that
+# "<this module>.moves" is importable by registering it explicitly.
+sys.modules.setdefault(moves.__name__, moves)
+
 
 class Module_six_moves_urllib_parse(_LazyModule):
 

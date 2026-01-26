@@ -16,6 +16,9 @@
             "name": "baramFlow",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "module": "baramFlow.main",
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "Generate: Qt resources (convertUi)"
@@ -24,6 +27,9 @@
             "name": "baramMesh",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "module": "baramMesh.main",
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "Generate: Qt resources (convertUi)"
@@ -32,6 +38,9 @@
             "name": "Binaries: Build (PyInstaller)",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "program": "${workspaceFolder}/tools/build_binaries.py",
             "args": [
                 "--clean"
@@ -44,6 +53,9 @@
             "name": "Binaries: Package zip (make_binary_release)",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "program": "${workspaceFolder}/tools/make_binary_release.py",
             "args": [
                 "--version",
