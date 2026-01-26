@@ -51,6 +51,12 @@
           }
         }
       },
+      "linux": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
+      "osx": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
       "problemMatcher": []
     },
     {
@@ -66,6 +72,21 @@
       ],
       "options": {
         "cwd": "${workspaceFolder}"
+      },
+      "windows": {
+        "command": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "PATH": "${workspaceFolder}\\venv\\Scripts;${env:PATH}"
+          }
+        }
+      },
+      "linux": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
+      "osx": {
+        "command": "${workspaceFolder}/venv/bin/python"
       },
       "problemMatcher": []
     },
@@ -88,6 +109,21 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
+      "windows": {
+        "command": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "PATH": "${workspaceFolder}\\venv\\Scripts;${env:PATH}"
+          }
+        }
+      },
+      "linux": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
+      "osx": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
       "dependsOn": ["Generate: Qt resources (convertUi)"],
       "problemMatcher": []
     },
@@ -98,6 +134,21 @@
       "args": ["-m", "baramMesh.main"],
       "options": {
         "cwd": "${workspaceFolder}"
+      },
+      "windows": {
+        "command": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "PATH": "${workspaceFolder}\\venv\\Scripts;${env:PATH}"
+          }
+        }
+      },
+      "linux": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
+      "osx": {
+        "command": "${workspaceFolder}/venv/bin/python"
       },
       "dependsOn": ["Generate: Qt resources (convertUi)"],
       "problemMatcher": []

@@ -34,6 +34,10 @@ mkdocs serve
 - Debug: use `.vscode/launch.json` (`baramFlow`, `baramMesh`).
 - Run tasks: `Run: baramFlow` / `Run: baramMesh` in `.vscode/tasks.json` (uses the selected VS Code Python interpreter).
 
+Python note:
+- The runtime dependencies in `requirements.txt` target Python 3.11+.
+- If you change versions/pins and see build-from-source failures on Windows, prefer packages with prebuilt wheels for your Python version.
+
 Recommended first-time setup:
 - Run the VS Code task `Setup: dev venv + deps` (or run `./bootstrap-dev.ps1`).
 - In VS Code, select the interpreter from `./venv`.
