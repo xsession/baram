@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog
 
+from libbaram.qt_utils import apply_vtk_theme_defaults
 from widgets.rendering.rendering_widget import RenderingWidget
 from widgets.rendering.rotation_center_widget import RotationCenterWidget
 from widgets.rendering.ruler_widget import RulerWidget
@@ -50,30 +51,8 @@ class RenderingTool:
         self._ui.axis.setChecked(False)
         self._ui.cubeAxis.setChecked(False)
 
-    @staticmethod
-    def _almost_equal_rgbf(a: tuple[float, float, float], b: tuple[float, float, float], tol: float = 1e-3) -> bool:
-        return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol and abs(a[2] - b[2]) <= tol
-
     def applyThemeDefaults(self, dark_mode: bool):
-        # Current defaults (light-ish gradient)
-        light_bg1 = (56 / 255, 61 / 255, 84 / 255)
-        light_bg2 = (209 / 255, 209 / 255, 209 / 255)
-
-        # Dark-mode defaults
-        dark_bg1 = (26 / 255, 26 / 255, 26 / 255)
-        dark_bg2 = (64 / 255, 64 / 255, 64 / 255)
-
-        cur_bg1 = tuple(self._view.background1())
-        cur_bg2 = tuple(self._view.background2())
-
-        if dark_mode:
-            if self._almost_equal_rgbf(cur_bg1, light_bg1) and self._almost_equal_rgbf(cur_bg2, light_bg2):
-                self._view.setBackground1(*dark_bg1)
-                self._view.setBackground2(*dark_bg2)
-        else:
-            if self._almost_equal_rgbf(cur_bg1, dark_bg1) and self._almost_equal_rgbf(cur_bg2, dark_bg2):
-                self._view.setBackground1(*light_bg1)
-                self._view.setBackground2(*light_bg2)
+        apply_vtk_theme_defaults(self._view, dark_mode)
 
     def _setRulerVisible(self, checked):
         if checked:

@@ -6,7 +6,7 @@ from typing import Optional
 from PySide6.QtCore import QCoreApplication
 
 
-FLOAT_PATTERN = '[-+]?\d*\.?\d+([eE][-+]?\d+)?'
+FLOAT_PATTERN = r'[-+]?\d*\.?\d+([eE][-+]?\d+)?'
 
 FLOAT_EXPRESSION = f'^{FLOAT_PATTERN}$'
 

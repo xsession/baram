@@ -42,7 +42,7 @@ async def checkMPI():
         process = await runExternalCommand(MPICMD, VERSION_CHECK_OPTION,
                                           stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout, stderr = await process.communicate()
-        m = re.search('([0-9]+)\.([0-9]+)\.', stdout.decode())
+        m = re.search(r'([0-9]+)\.([0-9]+)\.', stdout.decode())
         major = int(m.group(1))
         minor = int(m.group(2))
 

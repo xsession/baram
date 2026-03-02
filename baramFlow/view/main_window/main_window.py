@@ -231,8 +231,8 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
 
         try:
             rendering_view = self.renderingView()
-            if hasattr(rendering_view, '_applyThemeDefaults'):
-                rendering_view._applyThemeDefaults(dark_mode)
+            if hasattr(rendering_view, 'applyThemeDefaults'):
+                rendering_view.applyThemeDefaults(dark_mode)
                 rendering_view.refresh()
         except Exception:
             # Rendering view might not be initialized yet; ignore.

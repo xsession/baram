@@ -26,7 +26,7 @@ class NewProjectWidget(QWidget):
         self._dialog = None
 
         self._ui.projectName.setValidator(
-            QRegularExpressionValidator(QRegularExpression('[^\s\\\\/:*?"<>|][^\\\\/:*?"<>|]*')))
+            QRegularExpressionValidator(QRegularExpression(r'[^\s\\/:*?"<>|][^\\/:*?"<>|]*')))
 
         location = str(path.resolve() if path and path.exists() else Path.home())
         self._ui.projectLocation.setText(location)

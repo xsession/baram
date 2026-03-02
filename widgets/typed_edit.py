@@ -23,13 +23,13 @@ class FloatEdit(QLineEdit):
 class IdentifierEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setValidator(QRegularExpressionValidator(QRegularExpression('^[A-Za-z][A-Za-z0-9_\.]*')))
+        self.setValidator(QRegularExpressionValidator(QRegularExpression(r'^[A-Za-z][A-Za-z0-9_\.]*')))
 
 
 class MonitorNameEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setValidator(QRegularExpressionValidator(QRegularExpression('^[A-Za-z_][A-Za-z0-9_\-\.]*')))
+        self.setValidator(QRegularExpressionValidator(QRegularExpression(r'^[A-Za-z_][A-Za-z0-9_\-\.]*')))
 
 
 class IntEdit(QLineEdit):

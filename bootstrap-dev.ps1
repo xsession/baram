@@ -40,7 +40,10 @@ if (-not $PythonExe) {
 
 function Invoke-BootstrapPython {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-  Invoke-Native -FilePath $PythonExe @($pythonPrefixArgs + $Args)
+  $allArgs = [System.Collections.Generic.List[string]]::new()
+  foreach ($a in $pythonPrefixArgs) { $allArgs.Add($a) }
+  foreach ($a in $Args)              { $allArgs.Add($a) }
+  Invoke-Native -FilePath $PythonExe @allArgs
 }
 
 function Get-PythonMajorMinor {
@@ -66,6 +69,26 @@ if (-not $bootstrapVer -and $PythonExe -eq 'py' -and ($pythonPrefixArgs -join ' 
   $PythonExe = 'python'
   $pythonPrefixArgs = @()
   $bootstrapVer = Get-PythonMajorMinor -Exe $PythonExe -PrefixArgs $pythonPrefixArgs
+}
+# If still no suitable Python, try uv-managed Pythons (3.13, 3.12, 3.11).
+if (-not $bootstrapVer -or ($bootstrapVer.Major -ne 3) -or ($bootstrapVer.Minor -lt 11) -or ($bootstrapVer.Minor -gt 13)) {
+  $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+  if ($uvCmd) {
+    foreach ($uvMinor in @('3.13', '3.12', '3.11')) {
+      $uvPy = (& uv python find $uvMinor 2>$null)
+      if ($LASTEXITCODE -eq 0 -and $uvPy) {
+        $uvPy = $uvPy.Trim()
+        $candidateVer = Get-PythonMajorMinor -Exe $uvPy
+        if ($candidateVer -and $candidateVer.Major -eq 3 -and $candidateVer.Minor -ge 11 -and $candidateVer.Minor -le 13) {
+          $PythonExe = $uvPy
+          $pythonPrefixArgs = @()
+          $bootstrapVer = $candidateVer
+          Write-Output "Using uv-managed Python ${uvMinor}: $PythonExe"
+          break
+        }
+      }
+    }
+  }
 }
 if (-not $bootstrapVer) {
   throw "Failed to run Python interpreter: $PythonExe $($pythonPrefixArgs -join ' ')"

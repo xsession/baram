@@ -17,7 +17,7 @@
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
-            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "module": "baramFlow.main",
             "cwd": "${workspaceFolder}",
@@ -28,7 +28,7 @@
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
-            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "module": "baramMesh.main",
             "cwd": "${workspaceFolder}",
@@ -39,7 +39,7 @@
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
-            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "program": "${workspaceFolder}/tools/build_binaries.py",
             "args": [
@@ -54,7 +54,7 @@
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
-            "pythonPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
             "program": "${workspaceFolder}/tools/make_binary_release.py",
             "args": [
@@ -65,6 +65,17 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Prep: binaries (deps + Qt)"
+        },
+        {
+            "name": "baramEditor",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "python": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "debugAdapterPython": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+            "module": "baramEditor.main",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Generate: Qt resources (convertUi)"
         }
     ]
 }

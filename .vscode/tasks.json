@@ -198,6 +198,32 @@
       },
       "dependsOn": ["Prep: binaries (deps + Qt)"],
       "problemMatcher": []
+    },
+    {
+      "label": "Run: baramEditor",
+      "type": "process",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "baramEditor.main"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "windows": {
+        "command": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "PATH": "${workspaceFolder}\\venv\\Scripts;${env:PATH}"
+          }
+        }
+      },
+      "linux": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
+      "osx": {
+        "command": "${workspaceFolder}/venv/bin/python"
+      },
+      "dependsOn": ["Generate: Qt resources (convertUi)"],
+      "problemMatcher": []
     }
   ]
 }
