@@ -77,6 +77,13 @@ external_solver_command:
 For now, *OpenFOAM®* solvers modified by *NEXTFOAM* are integrated into *BARAM*.
 *NEXTFOAM* develops and releases it under GNU Public License (GPL).
 
+### Key Features
+- **Multi-format geometry import** — STL, STEP (.step/.stp), IGES (.iges/.igs), BREP (.brep/.brp)
+- **Automated mesh generation** — snappyHexMesh with GUI-driven configuration
+- **Enterprise logging** — rotating file logs, structured JSON, correlation IDs
+- **Centralised configuration** — environment variables, YAML config files, sensible defaults
+- **Structured error handling** — typed exception hierarchy with error codes
+
 
 ### Supported Platforms
 - Ubuntu 20.04 or later

@@ -21,17 +21,16 @@ import resource_rc
 
 from libbaram.mpi import checkMPI, MPIStatus
 from libbaram.process import getAvailablePhysicalCores
+from libbaram.logging_config import setup_logging
 
 from baramMesh.app import app
 from baramMesh.settings.app_properties import AppProperties
 from baramMesh.view.main_window.main_window import MainWindow
 
-logger = logging.getLogger()
-formatter = logging.Formatter("[%(asctime)s][%(name)s] ==> %(message)s")
-handler = logging.StreamHandler()
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Enterprise logging: rotating files + structured output
+setup_logging(app_name='baramMesh')
 
 
 def handle_exception(eType, eValue, eTraceback):

@@ -1,7 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""Geometry management page for BaramMesh.
+
+Handles import of STL and CAD (STEP/IGES/BREP) geometry files, primitive
+shape creation, geometry editing, and removal.  This is the first step in
+the BaramMesh workflow.
+"""
+
+from __future__ import annotations
+
 import asyncio
+import logging
 
 import qasync
 
@@ -15,6 +25,12 @@ from baramMesh.app import app
 from baramMesh.db.configurations_schema import CFDType, Shape, GeometryType
 from baramMesh.view.step_page import StepPage
 from widgets.async_message_box import AsyncMessageBox
+from .cad_utility import (
+    CADImporter,
+    CADImportError,
+    GmshNotAvailableError,
+    is_cad_file,
+)
 from .geometry import RESERVED_NAMES
 from .geometry_add_dialog import GeometryAddDialog
 from .geometry_import_dialog import ImportDialog
@@ -23,6 +39,8 @@ from .split_dialog import SplitDialog
 from .stl_utility import StlImporter
 from .surface_dialog import SurfaceDialog
 from .volume_dialog import VolumeDialog
+
+logger = logging.getLogger(__name__)
 
 
 class ContextMenu(QMenu):
@@ -114,7 +132,7 @@ class GeometryPage(StepPage):
     @qasync.asyncSlot()
     async def _importClicked(self):
         self._dialog = ImportDialog(self._widget)
-        self._dialog.accepted.connect(self._importSTL)
+        self._dialog.accepted.connect(self._importGeometry)
         self._dialog.open()
 
     def _addClicked(self):
@@ -213,23 +231,117 @@ class GeometryPage(StepPage):
         self.geometryRemoved.emit()
 
     @qasync.asyncSlot()
-    async def _importSTL(self):
+    async def _importGeometry(self):
+        """Import geometry files — auto-detects STL vs CAD (STEP/IGES/BREP).
+
+        Mixed selections are fully supported: STL files are handled by the
+        STL pipeline, CAD files by the CAD pipeline, and the results are
+        merged seamlessly.
+        """
+        all_files = self._dialog.files()
+        stl_files = self._dialog.stlFiles()
+        cad_files = self._dialog.cadFiles()
+
+        all_volumes = []
+        all_surfaces = []
+
+        # ── STL pipeline ──────────────────────────────────────────────
+        if stl_files:
+            try:
+                if self._dialog.featureAngle():
+                    splitDialog = SplitDialog(
+                        self._widget,
+                        stl_files,
+                        float(self._dialog.featureAngle()),
+                    )
+                    try:
+                        volumes, surfaces = await splitDialog.show()
+                    except asyncio.exceptions.CancelledError:
+                        return
+                else:
+                    stlImporter = StlImporter()
+                    stlImporter.load(stl_files)
+                    volumes, surfaces = stlImporter.identifyVolumes()
+
+                all_volumes.extend(volumes)
+                all_surfaces.extend(surfaces)
+            except Exception as exc:
+                logger.exception("STL import failed")
+                QMessageBox.critical(
+                    self._widget,
+                    self.tr('STL Import Error'),
+                    self.tr(f'Failed to import STL file(s): {exc}'),
+                )
+                return
+
+        # ── CAD pipeline (STEP / IGES / BREP) ────────────────────────
+        if cad_files:
+            try:
+                params = self._dialog.tessellationParams()
+                logger.info(
+                    "Importing %d CAD file(s) with quality: deflection=%.4f, angle=%.1f°",
+                    len(cad_files), params.deflection, params.angle,
+                )
+
+                cadImporter = CADImporter()
+                stats = cadImporter.load(cad_files, params=params)
+
+                for stat in stats:
+                    logger.info(stat.summary())
+
+                volumes, surfaces = cadImporter.identifyVolumes()
+                all_volumes.extend(volumes)
+                all_surfaces.extend(surfaces)
+
+            except GmshNotAvailableError:
+                QMessageBox.critical(
+                    self._widget,
+                    self.tr('Missing Dependency'),
+                    self.tr(
+                        'The <b>gmsh</b> package is required for STEP/IGES/BREP import.\n\n'
+                        'Install it with:\n'
+                        '  pip install gmsh'
+                    ),
+                )
+                return
+            except CADImportError as exc:
+                logger.exception("CAD import failed")
+                QMessageBox.critical(
+                    self._widget,
+                    self.tr('CAD Import Error'),
+                    self.tr(f'Failed to import CAD file(s):\n{exc}'),
+                )
+                return
+            except Exception as exc:
+                logger.exception("Unexpected error during CAD import")
+                QMessageBox.critical(
+                    self._widget,
+                    self.tr('Import Error'),
+                    self.tr(f'An unexpected error occurred:\n{exc}'),
+                )
+                return
+
+        # ── Common: store imported geometry in DB ─────────────────────
+        if not all_volumes and not all_surfaces:
+            QMessageBox.information(
+                self._widget,
+                self.tr('No Geometry'),
+                self.tr('No valid geometry was found in the selected file(s).'),
+            )
+            return
+
+        self._storeImportedGeometry(all_volumes, all_surfaces)
+
+    def _storeImportedGeometry(self, volumes, surfaces):
+        """Persist imported volumes and surfaces into the project database.
+
+        This method is format-agnostic — it works identically for geometry
+        originating from STL or CAD imports.
+        """
         def getUniqueSeq(name, seq):
             if seq == '' and name in RESERVED_NAMES:
                 seq = 1
-
             return db.getUniqueSeq('geometry', 'name', name, seq)
-
-        if self._dialog.featureAngle():
-            splitDialog = SplitDialog(self._widget, self._dialog.files(), float(self._dialog.featureAngle()))
-            try:
-                volumes, surfaces = await splitDialog.show()
-            except asyncio.exceptions.CancelledError:
-                return
-        else:
-            stlImporter = StlImporter()
-            stlImporter.load(self._dialog.files())
-            volumes, surfaces = stlImporter.identifyVolumes()
 
         try:
             addedVolumes = []
@@ -284,9 +396,21 @@ class GeometryPage(StepPage):
 
             for gId in addedSurfaces:
                 self._addSurface(gId)
+
+            logger.info(
+                "Geometry import complete: %d volumes, %d surfaces stored",
+                len(addedVolumes), len(addedSurfaces),
+            )
         except OpenFOAMError as ex:
             code, message = ex.args
-            QMessageBox.information(self._widget, self.tr('STL Loading Error'), f'{message} [{code}]')
+            QMessageBox.information(self._widget, self.tr('Geometry Loading Error'), f'{message} [{code}]')
+        except Exception as ex:
+            logger.exception("Failed to store imported geometry")
+            QMessageBox.critical(
+                self._widget,
+                self.tr('Import Error'),
+                self.tr(f'Failed to store geometry:\n{ex}'),
+            )
 
     def _addVolume(self, gId):
         volume = app.db.getElement('geometry',  gId)

@@ -22,6 +22,7 @@ import resource_rc
 
 from libbaram.mpi import checkMPI, MPIStatus
 from libbaram.process import getAvailablePhysicalCores
+from libbaram.logging_config import setup_logging
 
 from baramFlow.app import app
 from baramFlow.app_properties import AppProperties
@@ -31,12 +32,7 @@ from baramFlow.view.main_window.start_window import Baram
 from baramFlow.coredb.app_settings import AppSettings
 from libbaram.qt_utils import apply_dark_mode_stylesheet
 
-logger = logging.getLogger()
-formatter = logging.Formatter("[%(asctime)s][%(name)s] ==> %(message)s")
-handler = logging.StreamHandler()
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+setup_logging(app_name='baramFlow')
 
 
 def handle_exception(eType, eValue, eTraceback):

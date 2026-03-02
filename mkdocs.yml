@@ -19,6 +19,7 @@ nav:
   - Home: index.md
   - User:
       - Overview: user/overview.md
+      - Geometry Import: user/geometry-import.md
       - Tutorial: user/tutorials.md
       - How-to: user/howto.md
       - Explanations: user/explanations.md
@@ -26,6 +27,9 @@ nav:
   - Developer:
       - Overview: developer/overview.md
       - Architecture: developer/architecture.md
+      - STEP File Handling: developer/step-file-handling.md
+      - Enterprise Logging: developer/enterprise-logging.md
+      - Configuration: developer/configuration.md
       - Run & Debug: developer/run-debug.md
       - Build & Release: developer/build-release.md
       - Packaging: developer/packaging.md
