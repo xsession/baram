@@ -4,9 +4,10 @@
 """CAD file (STEP/IGES/BREP) import utility for BaramMesh.
 
 This module provides enterprise-grade STEP, IGES, and BREP file handling
-using the Gmsh meshing library as the CAD kernel. It tessellates CAD B-Rep
-geometry into triangulated surface meshes (vtkPolyData) compatible with the
-existing STL-based geometry pipeline.
+by delegating tessellation to a **subprocess** running the ``_gmsh_worker``
+module.  This architecture avoids native DLL conflicts between VTK's and
+gmsh's bundled OpenCASCADE libraries which would otherwise cause access-
+violation crashes when both are loaded in the same process.
 
 Supported formats
 -----------------
@@ -16,35 +17,37 @@ Supported formats
 
 Architecture
 ------------
-CADImporter produces ``StlSurface`` objects so that downstream code
-(volume identification, database storage, VTK rendering) requires **zero**
-changes.  The tessellation quality is controlled by *deflection* (chord
-tolerance) and *angle* (angular tolerance) parameters that map directly to
-the Gmsh meshing options.
+``CADImporter.load()`` spawns a child Python process
+(``_gmsh_worker.py``) for each CAD file.  The worker imports gmsh in a
+clean process (no VTK/PySide6 loaded), tessellates the geometry, and
+writes one binary STL file per surface entity to a temporary directory.
+The parent process then reads those STL files with ``vtkSTLReader`` and
+builds ``StlSurface`` objects identical to those produced by
+``StlImporter``.
 
 Example
 -------
 >>> from baramMesh.view.geometry.cad_utility import CADImporter, CADImportError
 >>> importer = CADImporter()
->>> importer.load([Path("housing.step")], deflection=0.001, angle=30.0)
+>>> importer.load([Path("housing.step")], params=TessellationParams.medium())
 >>> volumes, surfaces = importer.identifyVolumes()
 
 Dependencies
 ------------
-- ``gmsh`` >= 4.11  (``pip install gmsh``)
+- ``gmsh`` >= 4.11  (``pip install gmsh``) — loaded only in subprocess
 - ``numpy``
-- ``vtkmodules`` (provided by VTK)
-
-Notes
------
-Gmsh is initialised and finalised per-file to guarantee clean state and
-prevent memory leaks in long-running sessions.
+- ``vtkmodules`` (provided by VTK) — used in the main process only
 """
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import logging
 import re
+import shutil
+import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -53,10 +56,10 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from vtkmodules.vtkCommonCore import vtkFloatArray, vtkIdList, vtkIntArray, vtkPoints
-from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
-from vtkmodules.vtkFiltersCore import vtkAppendPolyData, vtkCleanPolyData
-from vtkmodules.vtkFiltersModeling import vtkSelectEnclosedPoints
+from vtkmodules.vtkCommonCore import vtkIntArray
+from vtkmodules.vtkCommonDataModel import vtkPolyData
+from vtkmodules.vtkFiltersCore import vtkCleanPolyData
+from vtkmodules.vtkIOGeometry import vtkSTLReader
 
 from .stl_utility import StlSurface, StringIndex, isClosed, composeVolume
 
@@ -155,6 +158,20 @@ class TessellationParams:
         """High quality for production meshes."""
         return cls(deflection=0.0001, angle=15.0, curvature_elements=24)
 
+    def to_dict(self) -> dict:
+        """Serialise to a plain dict for JSON transport to the subprocess."""
+        d: dict = {
+            'deflection': self.deflection,
+            'angle': self.angle,
+            'curvature_elements': self.curvature_elements,
+            'algorithm': self.algorithm,
+        }
+        if self.min_edge_length is not None:
+            d['min_edge_length'] = self.min_edge_length
+        if self.max_edge_length is not None:
+            d['max_edge_length'] = self.max_edge_length
+        return d
+
 
 # ---------------------------------------------------------------------------
 # Import statistics
@@ -207,15 +224,17 @@ class CADImportError(Exception):
 class GmshNotAvailableError(CADImportError):
     """Raised when the ``gmsh`` Python package is not installed."""
 
-    def __init__(self):
+    def __init__(self, msg=None):
         super().__init__(
-            "The 'gmsh' package is required for STEP/IGES/BREP import. "
-            "Install it with:  pip install gmsh"
+            msg or (
+                "The 'gmsh' package is required for STEP/IGES/BREP import. "
+                "Install it with:  pip install gmsh"
+            )
         )
 
 
 # ---------------------------------------------------------------------------
-# Internal: gmsh ↔ VTK conversion
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _sanitize_name(name: str) -> str:
@@ -232,92 +251,9 @@ def _sanitize_name(name: str) -> str:
     return sanitized
 
 
-def _gmsh_surface_to_polydata(gmsh_mod, surface_tag: int) -> Optional[vtkPolyData]:
-    """Convert a single Gmsh surface entity to a *vtkPolyData*.
-
-    Parameters
-    ----------
-    gmsh_mod
-        Reference to the ``gmsh.model`` module.
-    surface_tag : int
-        Gmsh entity tag (dimension 2).
-
-    Returns
-    -------
-    vtkPolyData or None
-        Triangulated surface, or *None* if the surface has no mesh.
-    """
-    try:
-        node_tags, node_coords, _ = gmsh_mod.mesh.getNodes(2, surface_tag, includeBoundary=True)
-    except Exception:
-        return None
-
-    if len(node_tags) == 0:
-        return None
-
-    coords = np.asarray(node_coords, dtype=np.float64).reshape(-1, 3)
-    tag_to_local = {int(t): i for i, t in enumerate(node_tags)}
-
-    elem_types, _, elem_node_tags = gmsh_mod.mesh.getElements(2, surface_tag)
-
-    # Collect only triangles (type 2) and quads (type 3); quads are split.
-    all_tris: List[Tuple[int, int, int]] = []
-    for etype, enodes in zip(elem_types, elem_node_tags):
-        if etype == 2:  # 3-node triangle
-            for i in range(0, len(enodes), 3):
-                n0 = tag_to_local.get(int(enodes[i]))
-                n1 = tag_to_local.get(int(enodes[i + 1]))
-                n2 = tag_to_local.get(int(enodes[i + 2]))
-                if n0 is not None and n1 is not None and n2 is not None:
-                    all_tris.append((n0, n1, n2))
-        elif etype == 3:  # 4-node quad → split into 2 triangles
-            for i in range(0, len(enodes), 4):
-                ns = [tag_to_local.get(int(enodes[i + j])) for j in range(4)]
-                if all(n is not None for n in ns):
-                    all_tris.append((ns[0], ns[1], ns[2]))
-                    all_tris.append((ns[0], ns[2], ns[3]))
-
-    if not all_tris:
-        return None
-
-    # Build VTK structures
-    points = vtkPoints()
-    points.SetNumberOfPoints(len(coords))
-    for idx, (x, y, z) in enumerate(coords):
-        points.SetPoint(idx, x, y, z)
-
-    triangles = vtkCellArray()
-    id_list = vtkIdList()
-    id_list.SetNumberOfIds(3)
-    for t in all_tris:
-        id_list.SetId(0, t[0])
-        id_list.SetId(1, t[1])
-        id_list.SetId(2, t[2])
-        triangles.InsertNextCell(id_list)
-
-    poly = vtkPolyData()
-    poly.SetPoints(points)
-    poly.SetPolys(triangles)
-
-    return poly
-
-
-def _get_entity_name(gmsh_mod, dim: int, tag: int) -> str:
-    """Retrieve the name assigned to a Gmsh entity, if any."""
-    try:
-        name = gmsh_mod.getEntityName(dim, tag)
-        return _sanitize_name(name.strip()) if name else ''
-    except Exception:
-        return ''
-
-
-def _compute_bounding_box(gmsh_mod) -> Tuple[float, ...]:
-    """Return the (xmin, ymin, zmin, xmax, ymax, zmax) bounding box."""
-    try:
-        bb = gmsh_mod.getBoundingBox(-1, -1)
-        return tuple(bb)
-    except Exception:
-        return ()
+def _worker_module_path() -> str:
+    """Return the absolute path to ``_gmsh_worker.py``."""
+    return str(Path(__file__).with_name('_gmsh_worker.py'))
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +266,9 @@ class CADImporter:
     Converts STEP / IGES / BREP geometry into triangulated ``StlSurface``
     objects that seamlessly integrate with the existing BaramMesh geometry
     pipeline.
+
+    The tessellation runs in a **subprocess** to avoid native DLL conflicts
+    between VTK and gmsh's OpenCASCADE libraries.
 
     Typical usage
     -------------
@@ -399,7 +338,7 @@ class CADImporter:
             if progress_callback:
                 progress_callback(f"Importing {f.name}…", idx / total)
 
-            stat = self._import_cad_file(Path(f), params)
+            stat = self._import_cad_file(Path(f), params, progress_callback)
             self._stats.append(stat)
             logger.info(stat.summary())
 
@@ -449,20 +388,26 @@ class CADImporter:
         return volumes, surfaces
 
     # ------------------------------------------------------------------
-    # Internals
+    # Internals — subprocess-based tessellation
     # ------------------------------------------------------------------
 
     def _import_cad_file(
         self,
         path: Path,
         params: TessellationParams,
+        progress_callback: Optional[Callable[[str, float], None]] = None,
     ) -> CADImportStats:
-        """Import a single CAD file and populate ``_surfaceList``."""
+        """Import a single CAD file via subprocess tessellation.
 
-        try:
-            import gmsh
-        except ImportError:
-            raise GmshNotAvailableError()
+        The workflow is:
+        1. Validate the file format.
+        2. Spawn ``_gmsh_worker.py`` in a child process, supplying a JSON
+           job on stdin.
+        3. The worker tessellates with gmsh and writes per-surface binary
+           STL files into a temporary directory.
+        4. Read the STL files back with ``vtkSTLReader`` and populate
+           ``_surfaceList``.
+        """
 
         cad_format = CADFormat.from_path(path)
         if cad_format == CADFormat.UNKNOWN:
@@ -470,166 +415,275 @@ class CADImporter:
                 f"Unsupported CAD format: {path.suffix}. "
                 f"Supported: .step/.stp, .iges/.igs, .brep/.brp"
             )
-
         if not path.is_file():
             raise CADImportError(f"File not found: {path}")
 
         stat = CADImportStats(file_path=str(path), format=cad_format.value)
         t0 = time.perf_counter()
 
-        # Gmsh initialisation — one instance per file for clean state
-        gmsh.initialize()
-        gmsh.option.setNumber("General.Verbosity", 1)  # Warnings only
-
+        # Create a temporary directory for the STL outputs
+        tmp_dir = tempfile.mkdtemp(prefix='baram_cad_')
         try:
-            self._configure_gmsh(gmsh, params)
-            self._load_and_mesh(gmsh, path, params, stat)
-            self._extract_surfaces(gmsh, path, stat)
-        except CADImportError:
-            raise
-        except Exception as exc:
-            raise CADImportError(
-                f"Failed to import '{path.name}': {exc}"
-            ) from exc
+            result = self._run_worker(path, params, tmp_dir, progress_callback)
+            self._process_result(result, path, stat, tmp_dir)
         finally:
+            # Clean up temporary files
             try:
-                gmsh.finalize()
+                shutil.rmtree(tmp_dir, ignore_errors=True)
             except Exception:
                 pass
 
         stat.elapsed_seconds = time.perf_counter() - t0
         return stat
 
-    @staticmethod
-    def _configure_gmsh(gmsh, params: TessellationParams) -> None:
-        """Apply tessellation parameters to Gmsh global options."""
-        gmsh.option.setNumber("Mesh.Algorithm", params.algorithm)
-        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", params.curvature_elements)
-        gmsh.option.setNumber("Mesh.AngleToleranceFacetOverlap", params.angle / 57.2958)
+    def _run_worker(
+        self,
+        path: Path,
+        params: TessellationParams,
+        tmp_dir: str,
+        progress_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> dict:
+        """Spawn the gmsh worker subprocess and return its JSON result."""
 
-        if params.min_edge_length is not None:
-            gmsh.option.setNumber("Mesh.MeshSizeMin", params.min_edge_length)
-        if params.max_edge_length is not None:
-            gmsh.option.setNumber("Mesh.MeshSizeMax", params.max_edge_length)
+        worker_script = _worker_module_path()
+        if not Path(worker_script).is_file():
+            raise CADImportError(
+                f"Internal error: gmsh worker script not found at {worker_script}"
+            )
 
-        # Enable adaptive meshing based on curvature
-        gmsh.option.setNumber("Mesh.MeshSizeFromCurvatureIsotropic", 1)
+        job = {
+            'file': str(path),
+            'out_dir': tmp_dir,
+            'params': params.to_dict(),
+        }
+        job_json = json.dumps(job)
 
-    @staticmethod
-    def _load_and_mesh(gmsh, path: Path, params: TessellationParams, stat: CADImportStats) -> None:
-        """Load CAD file into Gmsh and generate 2-D surface mesh."""
+        if progress_callback:
+            progress_callback(f"Tessellating {path.name}…", 0.05)
+
+        python_exe = sys.executable
+        # 1 hour timeout — complex STEP assemblies can take 30+ minutes
+        timeout_secs = 3600
+
         try:
-            gmsh.model.occ.importShapes(str(path))
+            proc = subprocess.Popen(
+                [python_exe, worker_script],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
         except Exception as exc:
-            raise CADImportError(f"Gmsh failed to read '{path.name}': {exc}") from exc
+            raise CADImportError(
+                f"Failed to launch gmsh subprocess for '{path.name}': {exc}"
+            ) from exc
 
-        gmsh.model.occ.synchronize()
-
-        # Compute bounding-box-relative mesh sizing if no explicit limits
-        stat.bounding_box = _compute_bounding_box(gmsh.model)
-        if stat.bounding_box and params.max_edge_length is None:
-            bb = stat.bounding_box
-            diag = ((bb[3] - bb[0]) ** 2 + (bb[4] - bb[1]) ** 2 + (bb[5] - bb[2]) ** 2) ** 0.5
-            if diag > 0:
-                auto_max = diag * params.deflection * 100
-                auto_min = auto_max * 0.01
-                gmsh.option.setNumber("Mesh.MeshSizeMax", auto_max)
-                if params.min_edge_length is None:
-                    gmsh.option.setNumber("Mesh.MeshSizeMin", auto_min)
-
-        # Collect entity counts
-        stat.num_solids = len(gmsh.model.getEntities(3))
-        stat.num_shells = len(gmsh.model.getEntities(2))
-        stat.num_faces = stat.num_shells
-
-        # Generate 2-D surface mesh
+        # Write the job JSON to stdin, then close stdin so the worker starts
         try:
-            gmsh.model.mesh.generate(2)
+            proc.stdin.write(job_json)
+            proc.stdin.close()
         except Exception as exc:
-            stat.warnings.append(f"Meshing warning: {exc}")
-            logger.warning("Gmsh meshing produced warnings for '%s': %s", path.name, exc)
+            proc.kill()
+            raise CADImportError(
+                f"Failed to send job to gmsh subprocess: {exc}"
+            ) from exc
 
-    def _extract_surfaces(self, gmsh, path: Path, stat: CADImportStats) -> None:
-        """Extract meshed surfaces from Gmsh model into StlSurface objects."""
-        fName = _sanitize_name(path.stem)
+        # Poll the subprocess while keeping the UI responsive.
+        # The worker writes PROGRESS:<phase>:<pct>:<detail> lines to
+        # stderr.  We use a background thread to read them (Windows does
+        # not support select() on pipes).
+        import time as _time
+        import threading
+        import queue
 
-        # Get all 2-D entities (surfaces)
-        surfaces_2d = gmsh.model.getEntities(2)
-        volumes_3d = gmsh.model.getEntities(3)
+        deadline = _time.monotonic() + timeout_secs
+        poll_interval = 0.15  # seconds between UI pumps
+        last_pct = 0.05
+        last_msg = f"Tessellating {path.name}…"
+        stderr_lines: list[str] = []  # collect non-progress stderr
+        line_queue: queue.Queue[str] = queue.Queue()
 
-        # Build mapping: surface_tag → volume_tag (if any)
-        surface_to_volume: Dict[int, int] = {}
-        for _, vol_tag in volumes_3d:
+        def _stderr_reader():
+            """Read stderr line-by-line in a background thread."""
             try:
-                boundaries = gmsh.model.getBoundary([(3, vol_tag)], oriented=False)
-                for _, surf_tag in boundaries:
-                    surface_to_volume[abs(surf_tag)] = vol_tag
-            except Exception:
-                pass
+                for raw in proc.stderr:
+                    line_queue.put(raw.rstrip('\n\r'))
+            except (ValueError, OSError):
+                pass  # pipe closed
 
-        # Group surfaces by their parent volume (or 'unattached')
-        volume_groups: Dict[int, List[int]] = {}
-        unattached: List[int] = []
+        reader_thread = threading.Thread(target=_stderr_reader, daemon=True)
+        reader_thread.start()
 
-        for _, surf_tag in surfaces_2d:
-            if surf_tag in surface_to_volume:
-                vol_tag = surface_to_volume[surf_tag]
-                volume_groups.setdefault(vol_tag, []).append(surf_tag)
-            else:
-                unattached.append(surf_tag)
+        while proc.poll() is None:
+            if _time.monotonic() > deadline:
+                proc.kill()
+                proc.wait()
+                raise CADImportError(
+                    f"Tessellation of '{path.name}' timed out "
+                    f"after {timeout_secs} seconds."
+                )
+
+            # Drain any lines the reader thread has collected
+            while not line_queue.empty():
+                try:
+                    line = line_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if line.startswith('PROGRESS:'):
+                    # Format: PROGRESS:<phase>:<pct>:<detail>
+                    parts = line.split(':', 3)
+                    if len(parts) >= 3:
+                        try:
+                            pct_int = int(parts[2])
+                            last_pct = max(last_pct, pct_int / 100.0)
+                        except ValueError:
+                            pass
+                        detail = parts[3] if len(parts) > 3 else ''
+                        if detail:
+                            last_msg = f"{path.name}: {detail}"
+                else:
+                    stderr_lines.append(line)
+
+            if progress_callback:
+                progress_callback(last_msg, last_pct)
+
+            _time.sleep(poll_interval)
+
+        # Wait for the reader thread to finish draining
+        reader_thread.join(timeout=5.0)
+
+        # Drain any remaining lines
+        while not line_queue.empty():
+            try:
+                line = line_queue.get_nowait()
+                if line.startswith('PROGRESS:'):
+                    pass
+                else:
+                    stderr_lines.append(line)
+            except queue.Empty:
+                break
+
+        # Read stdout
+        stdout_data = proc.stdout.read()
+        proc.stdout.close()
+        proc.stderr.close()
+
+        if proc.returncode != 0:
+            stderr = '\n'.join(stderr_lines).strip() or '(no output)'
+            raise CADImportError(
+                f"Gmsh subprocess failed for '{path.name}' "
+                f"(exit code {proc.returncode}):\n{stderr}"
+            )
+
+        # Parse JSON result from stdout
+        stdout = stdout_data.strip()
+        if not stdout:
+            raise CADImportError(
+                f"Gmsh subprocess produced no output for '{path.name}'.\n"
+                f"stderr: {'  '.join(stderr_lines) if stderr_lines else '(empty)'}"
+            )
+
+        try:
+            result = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise CADImportError(
+                f"Invalid JSON from gmsh subprocess for '{path.name}': {exc}\n"
+                f"stdout (first 500 chars): {stdout[:500]}"
+            ) from exc
+
+        if progress_callback:
+            progress_callback(f"Reading tessellation for {path.name}…", 0.90)
+
+        return result
+
+    def _process_result(
+        self,
+        result: dict,
+        path: Path,
+        stat: CADImportStats,
+        tmp_dir: str,
+    ) -> None:
+        """Read STL files produced by the worker and populate surfaces."""
+
+        # Check for errors reported by the worker
+        if 'error' in result:
+            raise CADImportError(result['error'])
+
+        # Populate statistics
+        stat.num_solids = result.get('num_solids', 0)
+        stat.num_shells = result.get('num_shells', 0)
+        stat.num_faces = result.get('num_faces', 0)
+        stat.total_triangles = result.get('total_triangles', 0)
+        stat.total_nodes = result.get('total_nodes', 0)
+        stat.warnings = result.get('warnings', [])
+        bb = result.get('bounding_box', [])
+        stat.bounding_box = tuple(bb) if bb else ()
+
+        fName = _sanitize_name(path.stem)
+        stl_files = result.get('stl_files', [])
+
+        if not stl_files:
+            stat.warnings.append("No surfaces were extracted from the CAD file.")
+            logger.warning("No surfaces extracted from '%s'", path.name)
+            return
 
         total_tris = 0
         total_nodes = 0
 
-        # Process volume-grouped surfaces: each surface → one StlSurface,
-        # sharing a common solid index per volume
-        for vol_tag, surf_tags in volume_groups.items():
-            vol_name = _get_entity_name(gmsh.model, 3, vol_tag)
-            if not vol_name:
-                vol_name = f"{fName}_solid{vol_tag}"
-            sIndex = self._stringIndices.putString(vol_name)
+        for entry in stl_files:
+            stl_path = Path(entry['path'])
+            solid_name = _sanitize_name(entry.get('solid_name', ''))
+            surface_name = _sanitize_name(entry.get('surface_name', ''))
 
-            for surf_tag in surf_tags:
-                poly = _gmsh_surface_to_polydata(gmsh.model, surf_tag)
-                if poly is None or poly.GetNumberOfCells() == 0:
-                    continue
+            if not stl_path.is_file():
+                logger.warning("Expected STL file not found: %s", stl_path)
+                continue
 
-                surf_name = _get_entity_name(gmsh.model, 2, surf_tag)
-                if not surf_name:
-                    surf_name = f"{vol_name}_face{surf_tag}"
-
-                n_cells = poly.GetNumberOfCells()
-                self._add_index_array(poly, 'fIndex', fName, n_cells)
-                self._add_index_array_with_index(poly, 'sIndex', sIndex, n_cells)
-
-                self._surfaceList.append(StlSurface(poly, fName, vol_name, sIndex))
-
-                total_tris += n_cells
-                total_nodes += poly.GetNumberOfPoints()
-
-        # Process unattached surfaces
-        for surf_tag in unattached:
-            poly = _gmsh_surface_to_polydata(gmsh.model, surf_tag)
+            poly = self._read_stl_file(stl_path)
             if poly is None or poly.GetNumberOfCells() == 0:
                 continue
 
-            surf_name = _get_entity_name(gmsh.model, 2, surf_tag)
-            if not surf_name:
-                surf_name = f"{fName}_face{surf_tag}"
-
             n_cells = poly.GetNumberOfCells()
-            self._add_index_array(poly, 'fIndex', fName, n_cells)
-            sIndex = self._add_index_array(poly, 'sIndex', surf_name, n_cells)
 
-            self._surfaceList.append(StlSurface(poly, fName, surf_name, sIndex))
+            # Add fIndex cell data — file name index
+            self._add_index_array(poly, 'fIndex', fName, n_cells)
+
+            # Add sIndex cell data — solid (volume group) index
+            if solid_name:
+                sIndex = self._stringIndices.putString(solid_name)
+                self._add_index_array_with_index(poly, 'sIndex', sIndex, n_cells)
+            else:
+                sIndex = self._add_index_array(poly, 'sIndex', surface_name, n_cells)
+
+            sName = solid_name or surface_name
+            self._surfaceList.append(StlSurface(poly, fName, sName, sIndex))
 
             total_tris += n_cells
             total_nodes += poly.GetNumberOfPoints()
 
+        # Update stats with VTK-side counts (may differ slightly from gmsh)
         stat.total_triangles = total_tris
         stat.total_nodes = total_nodes
 
-    def _add_index_array(self, polyData: vtkPolyData, arrayName: str, value: str, count: int) -> int:
+    @staticmethod
+    def _read_stl_file(path: Path) -> Optional[vtkPolyData]:
+        """Read a binary STL file and return a cleaned vtkPolyData."""
+        try:
+            reader = vtkSTLReader()
+            reader.SetFileName(str(path))
+            reader.Update()
+
+            clean = vtkCleanPolyData()
+            clean.SetInputData(reader.GetOutput())
+            clean.Update()
+
+            return clean.GetOutput()
+        except Exception as exc:
+            logger.warning("Failed to read STL file '%s': %s", path, exc)
+            return None
+
+    def _add_index_array(self, polyData: vtkPolyData, arrayName: str,
+                         value: str, count: int) -> int:
         """Add a cell-data integer array mapping to a StringIndex entry."""
         index = self._stringIndices.putString(value)
         array = vtkIntArray()
@@ -639,7 +693,8 @@ class CADImporter:
         polyData.GetCellData().AddArray(array)
         return index
 
-    def _add_index_array_with_index(self, polyData: vtkPolyData, arrayName: str, index: int, count: int) -> None:
+    def _add_index_array_with_index(self, polyData: vtkPolyData, arrayName: str,
+                                    index: int, count: int) -> None:
         """Add a cell-data integer array using an existing StringIndex entry."""
         array = vtkIntArray()
         array.SetName(arrayName)
@@ -652,13 +707,39 @@ class CADImporter:
 # Module-level convenience
 # ---------------------------------------------------------------------------
 
+# Cached result of gmsh availability check
+_gmsh_available: Optional[bool] = None
+
+
 def check_gmsh_available() -> bool:
-    """Return *True* if the ``gmsh`` package can be imported."""
-    try:
-        import gmsh  # noqa: F401
-        return True
-    except ImportError:
+    """Return *True* if the ``gmsh`` package is installed and can be loaded.
+
+    Uses ``importlib.util.find_spec`` to avoid actually importing gmsh (and
+    loading its native DLLs) in the main process.  Falls back to a
+    subprocess probe if ``find_spec`` succeeds but a previous attempt to
+    load gmsh failed.
+    """
+    global _gmsh_available
+    if _gmsh_available is not None:
+        return _gmsh_available
+
+    # Quick check: can Python find the gmsh package at all?
+    spec = importlib.util.find_spec('gmsh')
+    if spec is None:
+        _gmsh_available = False
         return False
+
+    # Verify the native library actually loads by asking a subprocess
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-c', 'import gmsh; print("ok")'],
+            capture_output=True, text=True, timeout=30,
+        )
+        _gmsh_available = (proc.returncode == 0 and 'ok' in proc.stdout)
+    except Exception:
+        _gmsh_available = False
+
+    return _gmsh_available
 
 
 def get_supported_formats_filter() -> str:

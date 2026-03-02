@@ -95,15 +95,20 @@ class StlImporter:
         self._solids: list[StlSurface] = []
         self._surfaceList: list[StlSurface] = []
 
-    def load(self, files: list[Path]):
+    def load(self, files: list[Path], progress_callback=None):
         self._stringIndices.clear()
         self._solids.clear()
         self._surfaceList.clear()
-        for f in files:
+        total = len(files)
+        for idx, f in enumerate(files):
+            if progress_callback:
+                progress_callback(f"Loading {f.name}…", idx / total if total else 0)
             solids = self._loadSTLFile(f)
             # solids and surfaceList are same without split
             self._solids.extend(solids)
             self._surfaceList.extend(solids)
+        if progress_callback:
+            progress_callback("STL loading complete.", 1.0)
 
     def split(self, angle: float, minArea: float):
         appendFilter = vtkAppendPolyData()

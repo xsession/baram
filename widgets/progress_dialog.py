@@ -44,6 +44,32 @@ class ProgressDialog(QDialog):
     def hideCancelButton(self):
         self._ui.button.setVisible(False)
 
+    # ------------------------------------------------------------------
+    # Determinate progress (percentage) support
+    # ------------------------------------------------------------------
+
+    def setRange(self, minimum: int, maximum: int):
+        """Switch to determinate mode with a [minimum, maximum] range."""
+        self._ui.progressBar.setRange(minimum, maximum)
+        self._ui.progressBar.setTextVisible(True)
+
+    def setPercent(self, value: int):
+        """Set the progress bar value and show *value %* text.
+
+        If the bar is still in indeterminate mode (range 0–0), this
+        automatically switches to a 0–100 range first.
+        """
+        if self._ui.progressBar.maximum() == 0:
+            self.setRange(0, 100)
+        self._ui.progressBar.setValue(value)
+
+    def setIndeterminate(self):
+        """Switch (back) to indeterminate / busy mode."""
+        self._ui.progressBar.setRange(0, 0)
+        self._ui.progressBar.setTextVisible(False)
+
+    # ------------------------------------------------------------------
+
     def abort(self, text: str):
         if not self._isOpen:
             super().open()

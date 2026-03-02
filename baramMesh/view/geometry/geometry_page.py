@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
+from typing import List, Optional
 
 import qasync
 
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMessageBox, QMenu
+from PySide6.QtWidgets import QApplication, QMessageBox, QMenu
 from PySide6.QtCore import Signal
 
 from libbaram.run import OpenFOAMError
@@ -25,6 +27,7 @@ from baramMesh.app import app
 from baramMesh.db.configurations_schema import CFDType, Shape, GeometryType
 from baramMesh.view.step_page import StepPage
 from widgets.async_message_box import AsyncMessageBox
+from widgets.progress_dialog import ProgressDialog
 from .cad_utility import (
     CADImporter,
     CADImportError,
@@ -234,38 +237,93 @@ class GeometryPage(StepPage):
     async def _importGeometry(self):
         """Import geometry files — auto-detects STL vs CAD (STEP/IGES/BREP).
 
-        Mixed selections are fully supported: STL files are handled by the
-        STL pipeline, CAD files by the CAD pipeline, and the results are
-        merged seamlessly.
+        Heavy file-loading runs on the main thread with periodic
+        ``QApplication.processEvents()`` calls so the progress dialog stays
+        responsive.  Mixed selections are fully supported.
         """
-        all_files = self._dialog.files()
         stl_files = self._dialog.stlFiles()
         cad_files = self._dialog.cadFiles()
+        feature_angle = self._dialog.featureAngle()
 
-        all_volumes = []
-        all_surfaces = []
+        # Feature-angle splitting uses its own modal dialog (SplitDialog),
+        # so handle it synchronously on the main thread before anything else.
+        split_volumes: list = []
+        split_surfaces: list = []
+        if stl_files and feature_angle:
+            try:
+                splitDialog = SplitDialog(
+                    self._widget,
+                    stl_files,
+                    float(feature_angle),
+                )
+                try:
+                    split_volumes, split_surfaces = await splitDialog.show()
+                except asyncio.exceptions.CancelledError:
+                    return
+            except Exception as exc:
+                logger.exception("STL split failed")
+                QMessageBox.critical(
+                    self._widget,
+                    self.tr('STL Import Error'),
+                    self.tr(f'Failed to split STL file(s): {exc}'),
+                )
+                return
+            # After split, don't process these files again
+            stl_files = []
+
+        # Determine whether there is anything left to import
+        if not stl_files and not cad_files and not split_volumes and not split_surfaces:
+            QMessageBox.information(
+                self._widget,
+                self.tr('No Geometry'),
+                self.tr('No valid geometry was found in the selected file(s).'),
+            )
+            return
+
+        # If only split results remain, skip loading phase entirely
+        if not stl_files and not cad_files:
+            self._storeImportedGeometry(split_volumes, split_surfaces)
+            return
+
+        # ── Progress dialog (main-thread with processEvents) ──────────
+        tess_params = self._dialog.tessellationParams() if cad_files else None
+        total_files = len(stl_files) + len(cad_files)
+
+        progressDlg = ProgressDialog(self._widget, self.tr('Importing Geometry…'))
+        progressDlg.setRange(0, 100)
+        progressDlg.setPercent(0)
+        progressDlg.setLabelText(self.tr('Preparing…'))
+        progressDlg.open()
+        QApplication.processEvents()
+
+        all_volumes: list = list(split_volumes)
+        all_surfaces: list = list(split_surfaces)
+
+        # Helper: update progress dialog and pump the event loop
+        def _update_progress(pct: int, msg: str):
+            progressDlg.setPercent(pct)
+            progressDlg.setLabelText(msg)
+            QApplication.processEvents()
 
         # ── STL pipeline ──────────────────────────────────────────────
         if stl_files:
             try:
-                if self._dialog.featureAngle():
-                    splitDialog = SplitDialog(
-                        self._widget,
-                        stl_files,
-                        float(self._dialog.featureAngle()),
-                    )
-                    try:
-                        volumes, surfaces = await splitDialog.show()
-                    except asyncio.exceptions.CancelledError:
-                        return
-                else:
-                    stlImporter = StlImporter()
-                    stlImporter.load(stl_files)
-                    volumes, surfaces = stlImporter.identifyVolumes()
+                stl_count = len(stl_files)
 
+                def stl_progress(msg, frac):
+                    pct = int(frac * (50 if cad_files else 85))
+                    _update_progress(pct, msg)
+
+                _update_progress(0, self.tr('Loading STL files…'))
+                importer = StlImporter()
+                importer.load(stl_files, progress_callback=stl_progress)
+
+                _update_progress(40 if cad_files else 80, self.tr('Identifying volumes in STL…'))
+                volumes, surfaces = importer.identifyVolumes()
                 all_volumes.extend(volumes)
                 all_surfaces.extend(surfaces)
             except Exception as exc:
+                progressDlg.close()
                 logger.exception("STL import failed")
                 QMessageBox.critical(
                     self._widget,
@@ -277,34 +335,40 @@ class GeometryPage(StepPage):
         # ── CAD pipeline (STEP / IGES / BREP) ────────────────────────
         if cad_files:
             try:
-                params = self._dialog.tessellationParams()
-                logger.info(
-                    "Importing %d CAD file(s) with quality: deflection=%.4f, angle=%.1f°",
-                    len(cad_files), params.deflection, params.angle,
+                stl_pct = 50 if stl_files else 0
+
+                def cad_progress(msg, frac):
+                    pct = stl_pct + int(frac * (85 - stl_pct))
+                    _update_progress(pct, msg)
+
+                _update_progress(stl_pct, self.tr('Loading CAD files…'))
+                cad_importer = CADImporter()
+                stats = cad_importer.load(
+                    cad_files,
+                    params=tess_params,
+                    progress_callback=cad_progress,
                 )
-
-                cadImporter = CADImporter()
-                stats = cadImporter.load(cad_files, params=params)
-
                 for stat in stats:
                     logger.info(stat.summary())
 
-                volumes, surfaces = cadImporter.identifyVolumes()
+                _update_progress(85, self.tr('Identifying volumes in CAD…'))
+                volumes, surfaces = cad_importer.identifyVolumes()
                 all_volumes.extend(volumes)
                 all_surfaces.extend(surfaces)
-
             except GmshNotAvailableError:
+                progressDlg.close()
                 QMessageBox.critical(
                     self._widget,
                     self.tr('Missing Dependency'),
                     self.tr(
-                        'The <b>gmsh</b> package is required for STEP/IGES/BREP import.\n\n'
-                        'Install it with:\n'
-                        '  pip install gmsh'
+                        'The <b>gmsh</b> package is required for '
+                        'STEP/IGES/BREP import.\n\n'
+                        'Install it with:\n  pip install gmsh'
                     ),
                 )
                 return
             except CADImportError as exc:
+                progressDlg.close()
                 logger.exception("CAD import failed")
                 QMessageBox.critical(
                     self._widget,
@@ -313,6 +377,7 @@ class GeometryPage(StepPage):
                 )
                 return
             except Exception as exc:
+                progressDlg.close()
                 logger.exception("Unexpected error during CAD import")
                 QMessageBox.critical(
                     self._widget,
@@ -320,6 +385,9 @@ class GeometryPage(StepPage):
                     self.tr(f'An unexpected error occurred:\n{exc}'),
                 )
                 return
+
+        _update_progress(90, self.tr('Finalising…'))
+        progressDlg.close()
 
         # ── Common: store imported geometry in DB ─────────────────────
         if not all_volumes and not all_surfaces:
@@ -335,17 +403,33 @@ class GeometryPage(StepPage):
     def _storeImportedGeometry(self, volumes, surfaces):
         """Persist imported volumes and surfaces into the project database.
 
-        This method is format-agnostic — it works identically for geometry
-        originating from STL or CAD imports.
+        Shows a progress dialog with percentage while writing geometry to
+        the HDF5 database.
         """
         def getUniqueSeq(name, seq):
             if seq == '' and name in RESERVED_NAMES:
                 seq = 1
             return db.getUniqueSeq('geometry', 'name', name, seq)
 
+        # Count total work items for percentage tracking
+        total_items = 0
+        for volume in volumes:
+            total_items += 1 + len(volume)   # volume entry + its surfaces
+        total_items += len(surfaces)
+        if total_items == 0:
+            total_items = 1  # avoid div-by-zero
+
+        progressDlg = ProgressDialog(self._widget, self.tr('Storing Geometry…'))
+        progressDlg.setRange(0, 100)
+        progressDlg.setPercent(0)
+        progressDlg.setLabelText(self.tr('Writing to database…'))
+        progressDlg.open()
+        QApplication.processEvents()
+
         try:
             addedVolumes = []
             addedSurfaces = []
+            processed = 0
 
             db = app.db.checkout()
             seq = ''
@@ -360,6 +444,11 @@ class GeometryPage(StepPage):
                 element.setValue('cfdType', CFDType.NONE.value)
                 volumeId = db.addElement('geometry', element)
                 addedVolumes.append(volumeId)
+                processed += 1
+                pct = int(processed / total_items * 100)
+                progressDlg.setPercent(pct)
+                progressDlg.setLabelText(self.tr(f'Storing volume: {volumeName}'))
+                QApplication.processEvents()
 
                 sName = f'{volumeName}_surface'
                 sseq = ''
@@ -375,6 +464,10 @@ class GeometryPage(StepPage):
                     element.setValue('cfdType', CFDType.BOUNDARY.value)
                     element.setValue('path', db.addGeometryPolyData(surface.polyData))
                     db.addElement('geometry', element)
+                    processed += 1
+                    pct = int(processed / total_items * 100)
+                    progressDlg.setPercent(pct)
+                    QApplication.processEvents()
 
             for surface in surfaces:
                 name = surface.sName if surface.sName else surface.fName
@@ -388,8 +481,18 @@ class GeometryPage(StepPage):
                 element.setValue('path', db.addGeometryPolyData(surface.polyData))
                 gId = db.addElement('geometry', element)
                 addedSurfaces.append(gId)
+                processed += 1
+                pct = int(processed / total_items * 100)
+                progressDlg.setPercent(pct)
+                progressDlg.setLabelText(self.tr(f'Storing surface: {surfaceName}'))
+                QApplication.processEvents()
 
+            progressDlg.setLabelText(self.tr('Committing…'))
             app.db.commit(db)
+
+            progressDlg.setPercent(100)
+            progressDlg.setLabelText(self.tr('Building display…'))
+            QApplication.processEvents()
 
             for gId in addedVolumes:
                 self._addVolume(gId)
@@ -411,6 +514,8 @@ class GeometryPage(StepPage):
                 self.tr('Import Error'),
                 self.tr(f'Failed to store geometry:\n{ex}'),
             )
+        finally:
+            progressDlg.close()
 
     def _addVolume(self, gId):
         volume = app.db.getElement('geometry',  gId)
