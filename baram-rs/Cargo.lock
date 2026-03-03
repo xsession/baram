@@ -268,7 +268,6 @@ dependencies = [
 name = "baram-web"
 version = "0.1.0"
 dependencies = [
- "baram-core",
  "console_error_panic_hook",
  "gloo-net",
  "gloo-timers",

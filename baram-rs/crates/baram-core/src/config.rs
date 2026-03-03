@@ -10,6 +10,8 @@ use std::path::PathBuf;
 pub struct AppConfig {
     pub openfoam_dir: PathBuf,
     pub paraview_dir: PathBuf,
+    pub elmer_dir: PathBuf,
+    pub fluidx3d_dir: PathBuf,
     pub recent_projects: Vec<PathBuf>,
     pub max_recent: usize,
     pub num_cores: u32,
@@ -22,6 +24,8 @@ impl Default for AppConfig {
         Self {
             openfoam_dir: PathBuf::new(),
             paraview_dir: PathBuf::new(),
+            elmer_dir: PathBuf::new(),
+            fluidx3d_dir: PathBuf::new(),
             recent_projects: Vec::new(),
             max_recent: 10,
             num_cores: num_cpus_hint(),

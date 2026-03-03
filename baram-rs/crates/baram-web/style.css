@@ -501,3 +501,201 @@ tr:hover td {
 .fade-in {
   animation: fade-in .3s ease-out;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Solver Backends Page
+   ═══════════════════════════════════════════════════════════════ */
+
+.backend-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.backend-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.backend-toggle:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+}
+
+.backend-toggle input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.backend-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ─── App layout overrides for 3-pane ─────────────────────── */
+
+.baram-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.baram-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 48px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.baram-logo {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-accent);
+  letter-spacing: .5px;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.baram-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.baram-navigator {
+  width: 220px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.baram-navigator .nav-section h3 {
+  padding: 14px 16px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.baram-navigator .nav-item {
+  display: block;
+  padding: 7px 16px 7px 24px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  border-left: 3px solid transparent;
+  font-size: 13px;
+}
+
+.baram-navigator .nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.baram-navigator .nav-item.active {
+  background: var(--bg-active);
+  color: #fff;
+  border-left-color: var(--accent);
+}
+
+.baram-viewport {
+  flex: 1;
+  background: #1a1a1e;
+  position: relative;
+  overflow: hidden;
+}
+
+.baram-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.viewport-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.baram-properties {
+  width: 380px;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 16px;
+}
+
+.baram-statusbar {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 28px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.baram-statusbar .spacer {
+  flex: 1;
+}
+
+/* ─── Page content helpers ─────────────────────────────────── */
+
+.page h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.page section {
+  margin-bottom: 16px;
+}
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.vector-input {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.form-field {
+  margin-bottom: 10px;
+}
+
+.form-field label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+

@@ -14,7 +14,7 @@ use crate::state::AppState;
 // ════════════════════════════════════════════════════════════════
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/events/{project_id}", get(ws_handler))
+    Router::new().route("/events/:project_id", get(ws_handler))
 }
 
 async fn ws_handler(

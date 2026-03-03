@@ -40,6 +40,7 @@ impl Project {
         db.save_models(&Default::default())?;
         db.save_numerical(&Default::default())?;
         db.save_run_conditions(&Default::default())?;
+        db.save_solver_backends(&Default::default())?;
 
         // Create case subdirectory structure
         let case = dir.join("case");

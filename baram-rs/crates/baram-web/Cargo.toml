@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-baram-core = { path = "../baram-core" }
+# baram-core is only used by baram-server (native); the web frontend talks via REST/JSON
 leptos      = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }

@@ -6,6 +6,7 @@ use crate::types::general::GeneralConfig;
 use crate::types::models::ModelsConfig;
 use crate::types::numerical::NumericalConfig;
 use crate::types::run::RunConditions;
+use crate::types::solver::SolverBackendsConfig;
 
 use super::schema::SCHEMA_SQL;
 
@@ -140,6 +141,23 @@ impl ProjectDb {
             None => {
                 let cfg = RunConditions::default();
                 self.save_run_conditions(&cfg)?;
+                Ok(cfg)
+            }
+        }
+    }
+
+    // ─── Solver backends config ───────────────────────────────
+    pub fn save_solver_backends(&self, cfg: &SolverBackendsConfig) -> Result<()> {
+        let json = serde_json::to_string(cfg)?;
+        self.upsert_singleton("solver_backends", &json)
+    }
+
+    pub fn load_solver_backends(&self) -> Result<SolverBackendsConfig> {
+        match self.get_singleton("solver_backends")? {
+            Some(json) => Ok(serde_json::from_str(&json)?),
+            None => {
+                let cfg = SolverBackendsConfig::default();
+                self.save_solver_backends(&cfg)?;
                 Ok(cfg)
             }
         }

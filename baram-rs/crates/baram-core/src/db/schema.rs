@@ -105,4 +105,8 @@ CREATE TABLE IF NOT EXISTS residuals (
     value     REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_residual_iter ON residuals(iteration);
-"#;
+-- ─── Solver backends (OpenFOAM / Elmer / FluidX3D) ────────
+CREATE TABLE IF NOT EXISTS solver_backends (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    config_json TEXT NOT NULL  -- serialized SolverBackendsConfig
+);"#;

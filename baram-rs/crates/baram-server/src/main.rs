@@ -1,6 +1,7 @@
 mod state;
 mod api;
 mod ws;
+mod solvers;
 
 use std::net::SocketAddr;
 use axum::Router;

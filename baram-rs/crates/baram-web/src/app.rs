@@ -43,6 +43,10 @@ pub fn App() -> impl IntoView {
                         <NavItem label="Initialization"    page="init"      current=current_page set_page=set_current_page />
                         <NavItem label="Run Conditions"    page="run"       current=current_page set_page=set_current_page />
                     </div>
+                    <div class="nav-section">
+                        <h3>"Solvers"</h3>
+                        <NavItem label="Solver Backends"   page="solvers"   current=current_page set_page=set_current_page />
+                    </div>
                 </nav>
 
                 // ─── Center: 3D Viewport ─────────────────
@@ -100,6 +104,7 @@ fn PageRouter(page: ReadSignal<String>) -> impl IntoView {
                     "bcs"       => view! { <crate::pages::boundary_conditions::BoundaryConditionsPage /> }.into_view(),
                     "numerical" => view! { <crate::pages::numerical::NumericalPage /> }.into_view(),
                     "run"       => view! { <crate::pages::run::RunPage /> }.into_view(),
+                    "solvers"   => view! { <crate::pages::solvers::SolversPage /> }.into_view(),
                     _           => view! { <p>"Select a page from the navigator."</p> }.into_view(),
                 }
             }}

@@ -6,11 +6,11 @@ target = "index.html"
 dist   = "dist"
 
 [watch]
-watch = ["crates/baram-web/src", "index.html", "style.css"]
+watch = ["src", "index.html", "style.css"]
 
 [serve]
 address = "127.0.0.1"
-port    = 8080
+port    = 9080
 
 # Proxy API and WebSocket calls to the Rust backend server
 [[proxy]]

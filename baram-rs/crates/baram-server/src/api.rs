@@ -17,27 +17,29 @@ pub fn routes() -> Router<AppState> {
         // Project
         .route("/project/create", post(create_project))
         .route("/project/open", post(open_project))
-        .route("/project/{id}/close", post(close_project))
+        .route("/project/:id/close", post(close_project))
         // General
-        .route("/project/{id}/general", get(get_general).put(put_general))
+        .route("/project/:id/general", get(get_general).put(put_general))
         // Models
-        .route("/project/{id}/models", get(get_models).put(put_models))
+        .route("/project/:id/models", get(get_models).put(put_models))
         // Boundary Conditions
-        .route("/project/{id}/regions/{rid}/bcs", get(list_bcs).post(create_bc))
-        .route("/project/{id}/regions/{rid}/bcs/{bcid}", put(update_bc).delete(delete_bc))
+        .route("/project/:id/regions/:rid/bcs", get(list_bcs).post(create_bc))
+        .route("/project/:id/regions/:rid/bcs/:bcid", put(update_bc).delete(delete_bc))
         // Numerical
-        .route("/project/{id}/numerical", get(get_numerical).put(put_numerical))
+        .route("/project/:id/numerical", get(get_numerical).put(put_numerical))
         // Run
-        .route("/project/{id}/run", get(get_run_conditions).put(put_run_conditions))
+        .route("/project/:id/run", get(get_run_conditions).put(put_run_conditions))
+        // Solver backends
+        .route("/project/:id/solver-backends", get(get_solver_backends).put(put_solver_backends))
         // Solver
-        .route("/project/{id}/solver/start", post(start_solver))
-        .route("/project/{id}/solver/stop", post(stop_solver))
+        .route("/project/:id/solver/start", post(start_solver))
+        .route("/project/:id/solver/stop", post(stop_solver))
         // Case generation
-        .route("/project/{id}/case/generate", post(generate_case))
+        .route("/project/:id/case/generate", post(generate_case))
         // Residuals
-        .route("/project/{id}/residuals/{field}", get(get_residuals))
+        .route("/project/:id/residuals/:field", get(get_residuals))
         // Mesh import
-        .route("/project/{id}/mesh/import-stl", post(import_stl))
+        .route("/project/:id/mesh/import-stl", post(import_stl))
 }
 
 // ─── Request / Response types ─────────────────────────────────
@@ -64,6 +66,12 @@ fn internal_error(msg: impl ToString) -> (StatusCode, Json<ErrorResponse>) {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse { error: msg.to_string() }),
     )
+}
+
+#[derive(Serialize)]
+struct SolverStartResponse {
+    backend: String,
+    message: String,
 }
 
 // ─── Project endpoints ────────────────────────────────────────
@@ -254,29 +262,57 @@ async fn put_run_conditions(
 
 // ─── Solver control ───────────────────────────────────────────
 
+// ─── Solver backends CRUD ─────────────────────────────────────
+
+async fn get_solver_backends(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<baram_core::types::solver::SolverBackendsConfig>, (StatusCode, Json<ErrorResponse>)> {
+    let project = state.inner.projects.get(&id).ok_or_else(|| internal_error("Project not found"))?;
+    let proj = project.lock().await;
+    let cfg = proj.db().load_solver_backends().map_err(|e| internal_error(e))?;
+    Ok(Json(cfg))
+}
+
+async fn put_solver_backends(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(cfg): Json<baram_core::types::solver::SolverBackendsConfig>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let project = state.inner.projects.get(&id).ok_or_else(|| internal_error("Project not found"))?;
+    let proj = project.lock().await;
+    proj.db().save_solver_backends(&cfg).map_err(|e| internal_error(e))?;
+    state.broadcast(&id, r#"{"type":"solver_backends_updated"}"#);
+    Ok(StatusCode::OK)
+}
+
 async fn start_solver(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    // Generate case first, then spawn solver
+) -> Result<Json<SolverStartResponse>, (StatusCode, Json<ErrorResponse>)> {
     let project = state.inner.projects.get(&id).ok_or_else(|| internal_error("Project not found"))?;
     let proj = project.lock().await;
     let case_dir = proj.case_dir();
-    baram_openfoam::case_generator::generate_case(proj.db(), &case_dir)
+
+    // Load solver backend config
+    let backends_cfg = proj.db().load_solver_backends().map_err(|e| internal_error(e))?;
+    crate::solvers::validate_backend(&backends_cfg).map_err(|e| internal_error(e))?;
+
+    let active = backends_cfg.active;
+
+    // For OpenFOAM, generate case files first
+    if active == baram_core::types::solver::SolverBackend::OpenFoam {
+        baram_openfoam::case_generator::generate_case(proj.db(), &case_dir)
+            .map_err(|e| internal_error(e))?;
+    }
+
+    // Dispatch to the correct backend
+    let msg = crate::solvers::start_solver(active, &backends_cfg, &case_dir, 1)
+        .await
         .map_err(|e| internal_error(e))?;
 
-    let general = proj.db().load_general().map_err(|e| internal_error(e))?;
-    let models = proj.db().load_models().map_err(|e| internal_error(e))?;
-    let solver_name = baram_openfoam::case_generator::select_solver(&general, &models);
-
-    let _runner = baram_openfoam::solver_runner::SolverRunner::new(
-        solver_name.executable(),
-        &case_dir,
-        1,
-    );
-
-    state.broadcast(&id, r#"{"type":"solver_started"}"#);
-    Ok(StatusCode::OK)
+    state.broadcast(&id, &format!(r#"{{"type":"solver_started","backend":"{:?}"}}"#, active));
+    Ok(Json(SolverStartResponse { backend: format!("{:?}", active), message: msg }))
 }
 
 async fn stop_solver(
