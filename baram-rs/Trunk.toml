@@ -1,0 +1,22 @@
+# ─── Trunk build configuration for BARAM WASM frontend ───────
+# Run: trunk serve --open
+
+[build]
+target = "index.html"
+dist   = "dist"
+
+[watch]
+watch = ["crates/baram-web/src", "index.html", "style.css"]
+
+[serve]
+address = "127.0.0.1"
+port    = 8080
+
+# Proxy API and WebSocket calls to the Rust backend server
+[[proxy]]
+rewrite = "/api/"
+backend = "http://localhost:8730/api/"
+
+[[proxy]]
+rewrite = "/ws/"
+backend = "ws://localhost:8730/ws/"

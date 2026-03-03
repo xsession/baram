@@ -1,0 +1,19 @@
+[package]
+name = "baram-core"
+version.workspace = true
+edition.workspace = true
+description = "Core types, database, configuration, and project management for BARAM CFD"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+nalgebra = { workspace = true }
+parking_lot = { workspace = true }
+rayon = { workspace = true }

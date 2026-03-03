@@ -1,0 +1,24 @@
+[package]
+name = "baram-server"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "baram-server"
+path = "src/main.rs"
+
+[dependencies]
+baram-core     = { path = "../baram-core" }
+baram-mesh     = { path = "../baram-mesh" }
+baram-openfoam = { path = "../baram-openfoam" }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+anyhow         = { workspace = true }
+thiserror      = { workspace = true }
+tracing        = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio          = { workspace = true }
+axum           = { workspace = true }
+tower-http     = { version = "0.5", features = ["cors", "fs"] }
+dashmap        = "5"
+uuid           = { workspace = true }
