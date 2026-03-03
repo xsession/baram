@@ -105,6 +105,45 @@ pub fn show(app: &mut BaramApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             }
         }
 
+        if ui.button("📐 Import STEP").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("STEP / STP", &["step", "stp", "STEP", "STP"])
+                .set_title("Import STEP CAD model")
+                .pick_file()
+            {
+                app.log(format!("Loading STEP file: {} …", path.display()));
+                match baram_mesh::step::load_step(&path, 0.01) {
+                    Ok(step_solids) => {
+                        let mut total_tris = 0usize;
+                        for solid in &step_solids {
+                            let mut node = SceneNode::new(solid.name.clone());
+                            node.component = NodeComponent::Mesh {
+                                mesh_index: 0,
+                                visible: true,
+                            };
+                            let h = app.scene.add_root_node(node);
+                            app.scene.selected = h;
+                            {
+                                let device = &*app.device;
+                                if let Some(vp) = &mut app.viewport {
+                                    vp.upload_mesh(device, &solid.mesh);
+                                }
+                            }
+                            total_tris += solid.mesh.num_triangles();
+                        }
+                        app.log(format!(
+                            "Imported STEP: {} shell(s), {} total triangles",
+                            step_solids.len(),
+                            total_tris
+                        ));
+                    }
+                    Err(e) => {
+                        app.log(format!("STEP import error: {e}"));
+                    }
+                }
+            }
+        }
+
         if ui.button("🗑 Delete selected").clicked() {
             let sel = app.scene.selected;
             if sel.is_some() {

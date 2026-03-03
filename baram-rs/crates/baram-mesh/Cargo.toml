@@ -14,3 +14,5 @@ nalgebra   = { workspace = true }
 bytemuck   = { workspace = true }
 rayon      = { workspace = true }
 nom        = { workspace = true }
+truck-stepio = "0.3"
+truck-meshalgo = "0.4"
