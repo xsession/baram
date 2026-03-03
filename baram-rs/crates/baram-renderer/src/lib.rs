@@ -2,3 +2,8 @@ pub mod gpu;
 pub mod camera;
 pub mod mesh_renderer;
 pub mod picker;
+pub mod scene;
+pub mod hedron;
+pub mod compute;
+pub mod gizmo;
+pub mod grid;

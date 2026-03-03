@@ -10,3 +10,6 @@ wgpu       = { workspace = true }
 glam       = { workspace = true }
 bytemuck   = { workspace = true }
 tracing    = { workspace = true }
+winit      = { workspace = true }
+pollster   = { workspace = true }
+tracing-subscriber = { workspace = true }
