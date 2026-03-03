@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""Component tree panel — Fusion 360-style sidebar with eye icons to
-toggle visibility, right-click context menu for rename/delete/colour,
-and drag selection.
+"""Component browser panel — Fusion 360 / Plasticity-style sidebar with:
+- Search/filter bar
+- Eye icons for visibility
+- Colour swatch per component
+- Right-click context menu
+- Summary footer
 """
 
 from __future__ import annotations
@@ -11,12 +14,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QBrush
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QAction, QColor, QIcon, QBrush, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
     QMenu, QInputDialog, QColorDialog, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QHeaderView,
+    QPushButton, QLineEdit, QHeaderView, QFrame, QToolButton,
+    QSizePolicy, QAbstractItemView, QStyledItemDelegate,
 )
 
 from baramEditor.cad_document import CADDocument, Component
@@ -24,12 +28,35 @@ from baramEditor.cad_document import CADDocument, Component
 logger = logging.getLogger(__name__)
 
 # Column indices
-COL_NAME = 0
-COL_TRIS = 1
+COL_VIS = 0     # visibility checkbox
+COL_COLOR = 1   # colour swatch
+COL_NAME = 2    # component name
+COL_TRIS = 3    # triangle count
+
+
+def _colour_swatch_icon(r: float, g: float, b: float, size: int = 16) -> QIcon:
+    """Create a small coloured circle icon."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(100, 100, 100), 1))
+    painter.setBrush(QBrush(QColor.fromRgbF(r, g, b)))
+    painter.drawEllipse(1, 1, size - 2, size - 2)
+    painter.end()
+    return QIcon(pix)
+
+
+def _h_line() -> QFrame:
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setStyleSheet('color: #484848;')
+    line.setFixedHeight(1)
+    return line
 
 
 class ComponentTree(QWidget):
-    """Sidebar tree listing all CAD components with visibility toggles."""
+    """Left-side component browser panel."""
 
     visibilityChanged = Signal(int, bool)    # tag, visible
     selectionChanged = Signal(int)           # tag
@@ -47,48 +74,89 @@ class ComponentTree(QWidget):
 
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
+        self.setObjectName('cadPanel')
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(400)
 
         self._document: Optional[CADDocument] = None
-        self._updating = False   # guard against signal loops
+        self._updating = False
 
-        # --- Layout ---
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Search bar
-        search_layout = QHBoxLayout()
+        # ═══ Header ═══
+        header = QHBoxLayout()
+        header.setContentsMargins(10, 8, 10, 8)
+        title = QLabel('Components')
+        title.setObjectName('panelTitle')
+        title.setStyleSheet(
+            'color: white; font-size: 12px; font-weight: bold; padding: 0;'
+        )
+        header.addWidget(title)
+
+        header.addStretch()
+
+        self._showAllBtn = QToolButton()
+        self._showAllBtn.setText('\U0001F441')   # eye icon
+        self._showAllBtn.setToolTip('Show All')
+        self._showAllBtn.setFixedSize(24, 24)
+        self._showAllBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._showAllBtn.setStyleSheet(
+            'QToolButton { background: transparent; border: none; font-size: 14px; }'
+            'QToolButton:hover { background: rgba(255,255,255,0.1); border-radius: 4px; }'
+        )
+        self._showAllBtn.clicked.connect(self.showAllRequested)
+        header.addWidget(self._showAllBtn)
+
+        layout.addLayout(header)
+
+        # ═══ Search bar ═══
+        search_container = QHBoxLayout()
+        search_container.setContentsMargins(10, 0, 10, 8)
         self._searchEdit = QLineEdit()
-        self._searchEdit.setPlaceholderText('Filter components…')
+        self._searchEdit.setPlaceholderText('\U0001F50D  Search components...')
         self._searchEdit.setClearButtonEnabled(True)
         self._searchEdit.textChanged.connect(self._filterTree)
-        search_layout.addWidget(self._searchEdit)
+        search_container.addWidget(self._searchEdit)
+        layout.addLayout(search_container)
 
-        self._showAllBtn = QPushButton('Show All')
-        self._showAllBtn.setFixedWidth(70)
-        self._showAllBtn.clicked.connect(self.showAllRequested)
-        search_layout.addWidget(self._showAllBtn)
-        layout.addLayout(search_layout)
+        layout.addWidget(_h_line())
 
-        # Tree widget
+        # ═══ Tree widget ═══
         self._tree = QTreeWidget()
-        self._tree.setHeaderLabels(['Component', 'Triangles'])
-        self._tree.setColumnCount(2)
+        self._tree.setHeaderLabels(['', '', 'Component', 'Tris'])
+        self._tree.setColumnCount(4)
         self._tree.header().setStretchLastSection(False)
+        self._tree.header().setSectionResizeMode(COL_VIS, QHeaderView.ResizeMode.Fixed)
+        self._tree.header().setSectionResizeMode(COL_COLOR, QHeaderView.ResizeMode.Fixed)
         self._tree.header().setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         self._tree.header().setSectionResizeMode(COL_TRIS, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.setColumnWidth(COL_VIS, 32)
+        self._tree.setColumnWidth(COL_COLOR, 28)
         self._tree.setRootIsDecorated(False)
         self._tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self._tree.setAlternatingRowColors(False)
+        self._tree.setIndentation(0)
+        self._tree.setAnimated(True)
         self._tree.itemChanged.connect(self._onItemChanged)
         self._tree.currentItemChanged.connect(self._onCurrentChanged)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._onContextMenu)
-        layout.addWidget(self._tree)
+        layout.addWidget(self._tree, 1)
 
-        # Summary
+        layout.addWidget(_h_line())
+
+        # ═══ Summary footer ═══
+        footer = QHBoxLayout()
+        footer.setContentsMargins(10, 6, 10, 6)
         self._summaryLabel = QLabel()
-        layout.addWidget(self._summaryLabel)
+        self._summaryLabel.setStyleSheet('color: #888; font-size: 10px;')
+        footer.addWidget(self._summaryLabel)
+        footer.addStretch()
+        layout.addLayout(footer)
 
-    # -- Document binding ----------------------------------------------------
+    # ── Document binding ───────────────────────────────────────────
 
     def set_document(self, doc: CADDocument):
         self._document = doc
@@ -108,23 +176,31 @@ class ComponentTree(QWidget):
         for comp in self._document.components:
             item = QTreeWidgetItem()
             item.setData(COL_NAME, Qt.ItemDataRole.UserRole, comp.tag)
-            item.setText(COL_NAME, comp.name)
-            item.setCheckState(COL_NAME,
+
+            # Visibility checkbox
+            item.setCheckState(COL_VIS,
                                Qt.CheckState.Checked if (comp.visible and not comp.deleted)
                                else Qt.CheckState.Unchecked)
 
+            # Colour swatch
+            r, g, b, a = comp.colour
+            item.setIcon(COL_COLOR, _colour_swatch_icon(r, g, b))
+
+            # Name
+            item.setText(COL_NAME, comp.name)
+
+            # Triangle count
             tri_count = comp.mesh.triangle_count() if comp.mesh else 0
             total_tris += tri_count
             item.setText(COL_TRIS, f'{tri_count:,}')
 
-            # Colour swatch via background
-            r, g, b, a = comp.colour
-            item.setBackground(COL_NAME, QBrush(QColor.fromRgbF(r, g, b, 0.25)))
-
+            # Deleted style
             if comp.deleted:
                 font = item.font(COL_NAME)
                 font.setStrikeOut(True)
                 item.setFont(COL_NAME, font)
+                item.setForeground(COL_NAME, QBrush(QColor('#666')))
+                item.setForeground(COL_TRIS, QBrush(QColor('#666')))
 
             item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled
@@ -136,7 +212,7 @@ class ComponentTree(QWidget):
         visible = sum(1 for c in self._document.components if c.visible and not c.deleted)
         total = len(self._document.components)
         self._summaryLabel.setText(
-            f'{visible}/{total} visible  ·  {total_tris:,} triangles'
+            f'{visible}/{total} visible  \u00B7  {total_tris:,} \u25B3'
         )
         self._updating = False
 
@@ -146,17 +222,30 @@ class ComponentTree(QWidget):
             item = self._tree.topLevelItem(i)
             if item.data(COL_NAME, Qt.ItemDataRole.UserRole) == comp.tag:
                 self._updating = True
+
                 item.setText(COL_NAME, comp.name)
                 item.setCheckState(
-                    COL_NAME,
+                    COL_VIS,
                     Qt.CheckState.Checked if (comp.visible and not comp.deleted)
                     else Qt.CheckState.Unchecked,
                 )
+
                 r, g, b, a = comp.colour
-                item.setBackground(COL_NAME, QBrush(QColor.fromRgbF(r, g, b, 0.25)))
+                item.setIcon(COL_COLOR, _colour_swatch_icon(r, g, b))
+
+                tri_count = comp.mesh.triangle_count() if comp.mesh else 0
+                item.setText(COL_TRIS, f'{tri_count:,}')
+
                 font = item.font(COL_NAME)
                 font.setStrikeOut(comp.deleted)
                 item.setFont(COL_NAME, font)
+                if comp.deleted:
+                    item.setForeground(COL_NAME, QBrush(QColor('#666')))
+                    item.setForeground(COL_TRIS, QBrush(QColor('#666')))
+                else:
+                    item.setForeground(COL_NAME, QBrush(QColor('#E0E0E0')))
+                    item.setForeground(COL_TRIS, QBrush(QColor('#888')))
+
                 self._updating = False
                 break
 
@@ -166,16 +255,16 @@ class ComponentTree(QWidget):
             total = len(self._document.components)
             total_tris = sum(c.mesh.triangle_count() for c in self._document.components if c.mesh)
             self._summaryLabel.setText(
-                f'{visible}/{total} visible  ·  {total_tris:,} triangles'
+                f'{visible}/{total} visible  \u00B7  {total_tris:,} \u25B3'
             )
 
-    # -- Slots ---------------------------------------------------------------
+    # ── Slots ──────────────────────────────────────────────────────
 
     def _onItemChanged(self, item: QTreeWidgetItem, column: int):
-        if self._updating or column != COL_NAME:
+        if self._updating or column != COL_VIS:
             return
         tag = item.data(COL_NAME, Qt.ItemDataRole.UserRole)
-        checked = item.checkState(COL_NAME) == Qt.CheckState.Checked
+        checked = item.checkState(COL_VIS) == Qt.CheckState.Checked
         self.visibilityChanged.emit(tag, checked)
 
     def _onCurrentChanged(self, current: QTreeWidgetItem, previous: QTreeWidgetItem):
@@ -194,60 +283,66 @@ class ComponentTree(QWidget):
             return
 
         menu = QMenu(self)
+        menu.setStyleSheet(
+            'QMenu { background: #3C3C3C; border: 1px solid #555; }'
+            'QMenu::item { padding: 6px 24px 6px 16px; }'
+            'QMenu::item:selected { background: #0696D7; }'
+            'QMenu::separator { height: 1px; background: #555; margin: 4px 8px; }'
+        )
 
-        # Rename
-        rename_action = menu.addAction('Rename…')
+        # ── Rename ──
+        rename_action = menu.addAction('\u270F\uFE0F  Rename...')
         rename_action.triggered.connect(lambda: self._doRename(tag, comp.name))
 
         menu.addSeparator()
 
-        # Visibility
+        # ── Visibility ──
         if comp.visible and not comp.deleted:
-            hide = menu.addAction('Hide')
+            hide = menu.addAction('\U0001F441  Hide')
             hide.triggered.connect(lambda: self.visibilityChanged.emit(tag, False))
         else:
-            show = menu.addAction('Show')
+            show = menu.addAction('\U0001F441  Show')
             show.triggered.connect(lambda: self.visibilityChanged.emit(tag, True))
 
-        isolate = menu.addAction('Isolate (show only this)')
+        isolate = menu.addAction('\U0001F50D  Isolate')
         isolate.triggered.connect(lambda: self.isolateRequested.emit(tag))
 
-        show_all = menu.addAction('Show All')
+        show_all = menu.addAction('\U0001F441  Show All')
         show_all.triggered.connect(self.showAllRequested.emit)
 
         menu.addSeparator()
 
-        # Colour
-        colour_action = menu.addAction('Change Colour…')
+        # ── Appearance ──
+        colour_action = menu.addAction('\U0001F3A8  Change Colour...')
         colour_action.triggered.connect(lambda: self._doColourPick(tag, comp.colour))
 
         menu.addSeparator()
 
-        # Transform operations
+        # ── Transform operations ──
         if not comp.deleted:
-            dup_action = menu.addAction('Duplicate')
+            dup_action = menu.addAction('\U0001F4CB  Duplicate')
             dup_action.triggered.connect(lambda: self.duplicateRequested.emit(tag))
 
-            move_action = menu.addAction('Move…')
+            move_action = menu.addAction('\u2194\uFE0F  Move...')
             move_action.triggered.connect(lambda: self.moveRequested.emit(tag))
 
-            rot_action = menu.addAction('Rotate…')
+            rot_action = menu.addAction('\U0001F504  Rotate...')
             rot_action.triggered.connect(lambda: self.rotateRequested.emit(tag))
 
-            scale_action = menu.addAction('Scale…')
+            scale_action = menu.addAction('\U0001F4D0  Scale...')
             scale_action.triggered.connect(lambda: self.scaleRequested.emit(tag))
 
-            mirror_action = menu.addAction('Mirror…')
+            mirror_action = menu.addAction('\U0001FA9E  Mirror...')
             mirror_action.triggered.connect(lambda: self.mirrorRequested.emit(tag))
 
         menu.addSeparator()
 
-        # Delete / Restore
+        # ── Delete / Restore ──
         if comp.deleted:
-            restore = menu.addAction('Restore')
+            restore = menu.addAction('\u267B\uFE0F  Restore')
             restore.triggered.connect(lambda: self.restoreRequested.emit(tag))
         else:
-            delete = menu.addAction('Delete')
+            delete = menu.addAction('\U0001F5D1\uFE0F  Delete')
             delete.triggered.connect(lambda: self.deleteRequested.emit(tag))
 
         menu.exec(self._tree.viewport().mapToGlobal(pos))

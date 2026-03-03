@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import qasync
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTreeWidgetItem
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QTreeWidgetItem, QCheckBox, QHBoxLayout, QLabel, QWidget
 
 from baramFlow.base.model.DPM_model import DPMModelManager
 from baramFlow.openfoam import parallel
@@ -15,8 +16,10 @@ from baramFlow.coredb import coredb
 from baramFlow.coredb.boundary_db import BoundaryType, BoundaryDB, GeometricalType
 from baramFlow.coredb.project import Project
 from baramFlow.coredb.region_db import DEFAULT_REGION_NAME
+from baramFlow.mesh.bc_colors import get_bc_color
 from baramFlow.view.widgets.content_page import ContentPage
 from .ABL_inlet_dialog import ABLInletDialog
+from .bc_quick_panel import BCQuickPanel, BCLegendWidget
 from .boundary_conditions_page_ui import Ui_BoundaryConditionsPage
 from .boundary_type_picker import BoundaryTypePicker
 from .boundary_widget import BoundaryWidget
@@ -104,11 +107,22 @@ class BoundaryConditionsPage(ContentPage):
 
         self._dialog = None
         self._typePicker = None
+        self._quickPanel = None
+        self._bcLegend = None
 
         self._ui.boundaries.setSortingEnabled(True)
         self._ui.boundaries.sortByColumn(0, Qt.SortOrder.AscendingOrder)
 
         self._ui.edit.setEnabled(False)
+
+        # ── FlowEFD-style: "Color by BC Type" toggle ──
+        self._colorByTypeCheck = QCheckBox(self.tr('Color by BC Type'))
+        self._colorByTypeCheck.setToolTip(
+            self.tr('FlowEFD-style: color each boundary surface by its type\n'
+                    '(blue=inlet, red=outlet, gray=wall, green=symmetry)'))
+        self._colorByTypeCheck.setChecked(False)
+        # Insert the checkbox above the boundary tree
+        self._ui.verticalLayout.insertWidget(2, self._colorByTypeCheck)
 
         self._connectSignalsSlots()
         self._updateCopyEnabled()
@@ -126,6 +140,7 @@ class BoundaryConditionsPage(ContentPage):
         self._ui.boundaries.currentItemChanged.connect(self._currentBoundaryChanged)
         self._ui.copy.clicked.connect(self._copy)
         self._ui.edit.clicked.connect(self._edit)
+        self._colorByTypeCheck.toggled.connect(self._toggleBCColorMode)
 
         Project.instance().solverStatusChanged.connect(self._updateCopyEnabled)
 
@@ -284,11 +299,53 @@ class BoundaryConditionsPage(ContentPage):
         app.meshModel().setCurrentId(current.type())
 
     def _selectPickedBoundary(self):
-        if app.meshModel().currentId():
-            self._ui.boundaries.setCurrentItem(self._boundaries[app.meshModel().currentId()])
+        bcid = app.meshModel().currentId()
+        if bcid:
+            self._ui.boundaries.setCurrentItem(self._boundaries[bcid])
+            # Show the FlowEFD-style quick panel near cursor
+            self._showQuickPanel(bcid)
         else:
             self._ui.boundaries.clearSelection()
+
+    def _showQuickPanel(self, bcid):
+        """Show the FlowEFD-style quick BC assignment panel."""
+        if bcid not in self._boundaries:
+            return
+        widget = self._ui.boundaries.itemWidget(self._boundaries[bcid], 1)
+        if not widget:
+            return
+        bcname = widget.bcname()
+        bctype = widget.type()
+
+        if self._quickPanel is None:
+            self._quickPanel = BCQuickPanel()
+            self._quickPanel.typeChangeRequested.connect(self._onQuickTypeChange)
+            self._quickPanel.editRequested.connect(self._onQuickEdit)
+
+        self._quickPanel.showForBoundary(bcid, bcname, bctype, QCursor.pos())
+
+    @qasync.asyncSlot()
+    async def _onQuickTypeChange(self, bcid, bctype):
+        """Handle quick BC type change from the floating panel."""
+        await self._changeBoundaryType(bcid, bctype)
+        # Refresh BC colors in 3D view
+        if app.meshModel() and app.meshModel().bcColorMode:
+            app.meshModel().refreshBCColors()
+
+    def _onQuickEdit(self, bcid):
+        """Open the full edit dialog for the given boundary."""
+        if bcid in self._boundaries:
+            self._ui.boundaries.setCurrentItem(self._boundaries[bcid])
+            self._edit()
+
+    def _toggleBCColorMode(self, checked):
+        """Toggle FlowEFD-style boundary-type coloring in 3D view."""
+        if app.meshModel():
+            app.meshModel().setBCColorMode(checked)
 
     def _refresh(self, boundaries):
         for bcid in boundaries:
             self._boundaries[bcid].reloadType()
+        # Refresh BC colors if active
+        if app.meshModel() and app.meshModel().bcColorMode:
+            app.meshModel().refreshBCColors()

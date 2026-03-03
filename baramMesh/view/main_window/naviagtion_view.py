@@ -16,6 +16,21 @@ steps = {
     'exportStep': Step.EXPORT
 }
 
+# Step labels with numbering for visual clarity
+_STEP_LABELS = {
+    Step.GEOMETRY:       '1. Geometry',
+    Step.REGION:         '2. Region',
+    Step.BASE_GRID:      '3. Base Grid',
+    Step.CASTELLATION:   '4. Castellation',
+    Step.SNAP:           '5. Snap',
+    Step.BOUNDARY_LAYER: '6. Boundary Layer',
+    Step.EXPORT:         '7. Export',
+}
+
+# Completed step prefix
+_CHECK = '\u2714 '   # ✔
+_CURRENT = '\u25b6 ' # ▶
+
 
 class NavigationView(QObject):
     currentStepChanged = Signal(int, int)
@@ -27,6 +42,7 @@ class NavigationView(QObject):
         self._steps = ui.stepButtons
         self._currentStep = Step.NONE
         self._workingStep = Step.GEOMETRY
+        self._completedSteps = set()
 
         for b in self._steps.buttons():
             self._steps.setId(b, steps[b.objectName()])
@@ -42,12 +58,17 @@ class NavigationView(QObject):
 
     def enableStep(self, step):
         self._steps.button(step).setEnabled(True)
+        # Mark as completed when enabled (it means the step succeeded)
+        if step != self._workingStep:
+            self._completedSteps.add(step)
+        self._updateStepLabels()
         self._updateBatchStepsEnabled()
 
     def disableStep(self, step):
         if step != Step.SNAP and step != Step.BOUNDARY_LAYER:
             self._steps.button(step).setEnabled(False)
-
+        self._completedSteps.discard(step)
+        self._updateStepLabels()
         self._updateBatchStepsEnabled()
 
     def setWorkingStep(self, step):
@@ -57,9 +78,13 @@ class NavigationView(QObject):
             button.setFont(font)
 
         self.enableStep(step)
+        # Previous working step is now completed
+        if self._workingStep != step and self._workingStep != Step.NONE:
+            self._completedSteps.add(self._workingStep)
         setBold(self._steps.button(self._workingStep), False)
         self._workingStep = step
         setBold(self._steps.button(step), True)
+        self._updateStepLabels()
 
     def _connectSignalsSlots(self):
         self._steps.idClicked.connect(self._stepChanged)
@@ -68,7 +93,21 @@ class NavigationView(QObject):
         step = self._steps.id(self._steps.checkedButton())
         self.currentStepChanged.emit(step, self._currentStep)
         self._currentStep = step
+        self._updateStepLabels()
 
     def _updateBatchStepsEnabled(self):
         self._ui.snapStep.setEnabled(self._ui.castellationStep.isEnabled())
         self._ui.boundaryLayerStep.setEnabled(self._ui.castellationStep.isEnabled())
+
+    def _updateStepLabels(self):
+        """Update step button text with completion checkmarks and current-step indicator."""
+        for step, label in _STEP_LABELS.items():
+            btn = self._steps.button(step)
+            if btn is None:
+                continue
+            if step in self._completedSteps and step != self._workingStep:
+                btn.setText(_CHECK + label)
+            elif step == self._currentStep and step == self._workingStep:
+                btn.setText(_CURRENT + label)
+            else:
+                btn.setText(label)

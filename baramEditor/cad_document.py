@@ -195,49 +195,27 @@ class ModificationHistory:
 # ---------------------------------------------------------------------------
 
 _GMSH_WORKER_SCRIPT = r'''
-"""gmsh subprocess worker — reads a JSON job on stdin, tessellates the CAD
-file, and writes per-entity binary STL files to the given output directory.
+"""gmsh subprocess worker -- reads a JSON job on stdin, tessellates the CAD
+file, and writes per-entity numpy arrays to the given output directory.
 Outputs a JSON result on stdout.  Progress is written to stderr as:
   PROGRESS:<percent>:<message>
+
+Uses ALL available CPU cores for meshing via gmsh threading and
+parallel numpy extraction with concurrent.futures.
 """
-import json, sys, pathlib, struct
+import json, sys, pathlib, math, traceback, os
 
 def _progress(pct, msg):
-    """Write a progress line to stderr for the parent to parse."""
     sys.stderr.write(f"PROGRESS:{pct}:{msg}\n")
     sys.stderr.flush()
 
-job = json.loads(sys.stdin.read())
-file_path = job["file"]
-out_dir    = pathlib.Path(job["out_dir"])
-deflection = job.get("deflection", 0.001)
-angle      = job.get("angle", 30.0)
+def _extract_entity(args):
+    """Extract mesh for one entity — runs in a ThreadPoolExecutor."""
+    import gmsh
+    import numpy as _np
+    dim, tag, out_dir = args
+    out_dir = pathlib.Path(out_dir)
 
-_progress(0, "Initializing gmsh…")
-import gmsh
-gmsh.initialize()
-gmsh.option.setNumber("General.Terminal", 0)
-gmsh.option.setNumber("Geometry.OCCImportLabels", 1)
-
-_progress(5, "Importing CAD geometry…")
-gmsh.model.occ.importShapes(file_path)
-gmsh.model.occ.synchronize()
-
-# Collect all top-level volumes, or surfaces if no volumes
-volumes = gmsh.model.getEntities(dim=3)
-surfaces = gmsh.model.getEntities(dim=2)
-entities = volumes if volumes else surfaces
-
-_progress(15, f"Found {len(entities)} entities, meshing…")
-
-results = []
-total_entities = len(entities)
-for eidx, (dim, tag) in enumerate(entities):
-    # Report progress for each entity (range 15–90%)
-    ent_pct = 15 + int(75 * eidx / max(total_entities, 1))
-    _progress(ent_pct, f"Tessellating entity {eidx+1}/{total_entities}…")
-
-    # Try to get a name from the STEP label
     label = ""
     try:
         label = gmsh.model.getEntityName(dim, tag)
@@ -246,109 +224,180 @@ for eidx, (dim, tag) in enumerate(entities):
     if not label:
         kind = "Solid" if dim == 3 else "Surface"
         label = f"{kind}_{tag}"
-    # Clean label
     label = label.rsplit("/", 1)[-1] if "/" in label else label
 
-    # Get the boundary surfaces for this entity to tessellate
     if dim == 3:
-        bnd = gmsh.model.getBoundary([(dim, tag)], oriented=False, recursive=False)
-        surf_tags = [abs(t) for _, t in bnd]
+        try:
+            bnd = gmsh.model.getBoundary([(dim, tag)],
+                                          oriented=False, recursive=False)
+            surf_tags = [abs(t) for _, t in bnd]
+        except Exception:
+            surf_tags = []
     else:
         surf_tags = [tag]
 
-    # Tessellate
-    all_verts = []
+    all_coords = []
     all_faces = []
     vert_offset = 0
+
     for stag in surf_tags:
         try:
-            node_tags, coords, _ = gmsh.model.mesh.getNodes(dim=2, tag=stag)
+            node_tags, coords, _ = gmsh.model.mesh.getNodes(
+                dim=2, tag=stag, includeBoundary=True)
         except Exception:
-            # Need to mesh first
-            gmsh.option.setNumber("Mesh.MeshSizeMin", deflection * 0.5)
-            gmsh.option.setNumber("Mesh.MeshSizeMax", deflection * 50)
-            gmsh.option.setNumber("Mesh.AngleToleranceFacetOverlap", angle)
-            gmsh.model.mesh.generate(2)
-            try:
-                node_tags, coords, _ = gmsh.model.mesh.getNodes(dim=2, tag=stag)
-            except Exception:
-                continue
-
+            continue
         if len(coords) == 0:
             continue
 
-        verts = [(coords[i], coords[i+1], coords[i+2]) for i in range(0, len(coords), 3)]
-        tag_to_idx = {int(t): i for i, t in enumerate(node_tags)}
+        # Vectorized vertex extraction using numpy
+        n_nodes = len(coords) // 3
+        verts = _np.array(coords, dtype=_np.float64).reshape(n_nodes, 3)
+        tag_to_idx = {}
+        for i, t in enumerate(node_tags):
+            tag_to_idx[int(t)] = i
 
         try:
-            elem_types, elem_tags, elem_nodes = gmsh.model.mesh.getElements(dim=2, tag=stag)
+            elem_types, _, elem_nodes = gmsh.model.mesh.getElements(
+                dim=2, tag=stag)
         except Exception:
             continue
 
         for et, enodes in zip(elem_types, elem_nodes):
-            etype = gmsh.model.mesh.getElementProperties(et)
-            if etype[1] != 2:  # not triangle type (dim)
-                continue
-            nodes_per = etype[3]
-            for i in range(0, len(enodes), nodes_per):
-                tri = []
-                for j in range(3):
-                    node = int(enodes[i+j])
-                    if node in tag_to_idx:
-                        tri.append(tag_to_idx[node] + vert_offset)
-                if len(tri) == 3:
-                    all_faces.append(tri)
+            enodes_int = _np.array(enodes, dtype=_np.int64)
+            if et == 2:  # 3-node triangle
+                tri_nodes = enodes_int.reshape(-1, 3)
+                for tri in tri_nodes:
+                    idx = [tag_to_idx.get(int(n)) for n in tri]
+                    if all(x is not None for x in idx):
+                        all_faces.append([idx[0]+vert_offset,
+                                          idx[1]+vert_offset,
+                                          idx[2]+vert_offset])
+            elif et == 3:  # 4-node quad -> 2 triangles
+                quad_nodes = enodes_int.reshape(-1, 4)
+                for quad in quad_nodes:
+                    idx = [tag_to_idx.get(int(n)) for n in quad]
+                    if all(x is not None for x in idx):
+                        all_faces.append([idx[0]+vert_offset,
+                                          idx[1]+vert_offset,
+                                          idx[2]+vert_offset])
+                        all_faces.append([idx[0]+vert_offset,
+                                          idx[2]+vert_offset,
+                                          idx[3]+vert_offset])
 
-        all_verts.extend(verts)
-        vert_offset += len(verts)
+        all_coords.append(verts)
+        vert_offset += n_nodes
 
-    # If we didn't get mesh yet, force-mesh and try once more
-    if not all_verts:
-        gmsh.option.setNumber("Mesh.MeshSizeMin", deflection * 0.5)
-        gmsh.option.setNumber("Mesh.MeshSizeMax", deflection * 50)
-        gmsh.model.mesh.generate(2)
-        # Retry for this entity
-        for stag in surf_tags:
-            try:
-                node_tags, coords, _ = gmsh.model.mesh.getNodes(dim=2, tag=stag)
-            except Exception:
-                continue
-            if len(coords) == 0:
-                continue
-            verts = [(coords[i], coords[i+1], coords[i+2]) for i in range(0, len(coords), 3)]
-            tag_to_idx = {int(t): i for i, t in enumerate(node_tags)}
-            try:
-                elem_types, elem_tags, elem_nodes = gmsh.model.mesh.getElements(dim=2, tag=stag)
-            except Exception:
-                continue
-            for et, enodes in zip(elem_types, elem_nodes):
-                etype = gmsh.model.mesh.getElementProperties(et)
-                nodes_per = etype[3]
-                for i in range(0, len(enodes), nodes_per):
-                    tri = []
-                    for j in range(3):
-                        node = int(enodes[i+j])
-                        if node in tag_to_idx:
-                            tri.append(tag_to_idx[node] + vert_offset)
-                    if len(tri) == 3:
-                        all_faces.append(tri)
-            all_verts.extend(verts)
-            vert_offset += len(verts)
-
-    # Write binary numpy files
-    if all_verts:
-        import numpy as _np
-        v = _np.array(all_verts, dtype=_np.float64)
-        f = _np.array(all_faces, dtype=_np.int32) if all_faces else _np.zeros((0, 3), dtype=_np.int32)
+    if all_coords:
+        v = _np.concatenate(all_coords, axis=0)
+        f = (_np.array(all_faces, dtype=_np.int32)
+             if all_faces
+             else _np.zeros((0, 3), dtype=_np.int32))
         _np.save(str(out_dir / f"verts_{dim}_{tag}.npy"), v)
         _np.save(str(out_dir / f"faces_{dim}_{tag}.npy"), f)
-        results.append({"dim": dim, "tag": tag, "name": label,
-                         "nverts": len(all_verts), "nfaces": len(all_faces)})
+        return {"dim": dim, "tag": tag, "name": label,
+                "nverts": int(v.shape[0]), "nfaces": len(all_faces)}
+    return None
 
-_progress(95, "Finalizing…")
-gmsh.finalize()
-_progress(100, "Done")
-print(json.dumps(results))
+
+def _main():
+    job = json.loads(sys.stdin.read())
+    file_path = job["file"]
+    out_dir    = pathlib.Path(job["out_dir"])
+    deflection = job.get("deflection", 0.001)
+    angle      = job.get("angle", 30.0)
+
+    # Detect available CPU cores
+    ncpus = os.cpu_count() or 1
+
+    _progress(0, f"Initializing gmsh ({ncpus} cores)")
+    import gmsh
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.option.setNumber("Geometry.OCCImportLabels", 1)
+
+    # ═══ Enable multi-threaded meshing on ALL available cores ═══
+    gmsh.option.setNumber("General.NumThreads", ncpus)
+    gmsh.option.setNumber("Mesh.MaxNumThreads1D", ncpus)
+    gmsh.option.setNumber("Mesh.MaxNumThreads2D", ncpus)
+    gmsh.option.setNumber("Mesh.MaxNumThreads3D", ncpus)
+
+    try:
+        _progress(5, "Importing CAD geometry")
+        gmsh.model.occ.importShapes(file_path)
+        gmsh.model.occ.synchronize()
+
+        # Collect entities
+        volumes = gmsh.model.getEntities(dim=3)
+        surfaces = gmsh.model.getEntities(dim=2)
+        entities = volumes if volumes else surfaces
+
+        # Bounding-box-relative sizing
+        try:
+            bb = gmsh.model.getBoundingBox(-1, -1)
+            diag = math.sqrt((bb[3]-bb[0])**2 + (bb[4]-bb[1])**2 + (bb[5]-bb[2])**2)
+            if diag > 0:
+                auto_max = diag * deflection * 100
+                auto_min = auto_max * 0.01
+                gmsh.option.setNumber("Mesh.MeshSizeMax", auto_max)
+                gmsh.option.setNumber("Mesh.MeshSizeMin", auto_min)
+        except Exception:
+            gmsh.option.setNumber("Mesh.MeshSizeMin", deflection * 0.5)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", deflection * 50)
+
+        gmsh.option.setNumber("Mesh.Algorithm", 6)
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 12)
+        gmsh.option.setNumber("Mesh.AngleToleranceFacetOverlap",
+                              angle / 57.2958)
+
+        _progress(15, f"Meshing {len(entities)} entities on {ncpus} threads")
+
+        # Multi-threaded mesh generation
+        gmsh.model.mesh.generate(2)
+
+        _progress(50, "Mesh generated, extracting surfaces in parallel")
+
+        # ═══ Parallel entity extraction using thread pool ═══
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        extract_args = [(dim, tag, str(out_dir)) for dim, tag in entities]
+        results = []
+        total_entities = len(entities)
+
+        # Use threads (not processes) since gmsh state is shared
+        # but numpy I/O benefits from parallelism
+        n_workers = min(ncpus, total_entities, 8)
+        done_count = 0
+
+        with ThreadPoolExecutor(max_workers=max(n_workers, 1)) as pool:
+            futures = {pool.submit(_extract_entity, a): a for a in extract_args}
+            for future in as_completed(futures):
+                done_count += 1
+                ent_pct = 50 + int(40 * done_count / max(total_entities, 1))
+                _progress(ent_pct, f"Extracted {done_count}/{total_entities}")
+                r = future.result()
+                if r is not None:
+                    results.append(r)
+
+        _progress(95, "Finalizing")
+        gmsh.finalize()
+        _progress(100, "Done")
+        print(json.dumps(results))
+
+    except Exception:
+        sys.stderr.write(traceback.format_exc())
+        sys.stderr.flush()
+        try:
+            gmsh.finalize()
+        except Exception:
+            pass
+        sys.exit(1)
+
+
+try:
+    _main()
+except Exception:
+    traceback.print_exc()
+    sys.exit(1)
 '''
 
 
@@ -389,59 +438,75 @@ def _load_step_via_subprocess(
         proc.stdin.write(job)
         proc.stdin.close()
 
-        # Stream stderr for PROGRESS lines while process runs
-        stderr_lines: List[str] = []
-        for line in proc.stderr:
-            line = line.rstrip()
-            if line.startswith('PROGRESS:'):
-                parts = line.split(':', 2)
-                if len(parts) >= 3 and progress is not None:
-                    try:
-                        pct = int(parts[1])
-                    except ValueError:
-                        pct = -1
-                    progress(pct, parts[2])
-            else:
-                stderr_lines.append(line)
+        # Stream stderr for PROGRESS lines while process runs.
+        # Use a background thread to read stderr so we never deadlock
+        # even if the child writes a lot and the pipe buffer fills.
+        import threading
 
-        proc.wait(timeout=300)
+        stderr_lines: List[str] = []
+
+        def _drain_stderr():
+            for line in proc.stderr:
+                line = line.rstrip()
+                if line.startswith('PROGRESS:'):
+                    parts = line.split(':', 2)
+                    if len(parts) >= 3 and progress is not None:
+                        try:
+                            pct = int(parts[1])
+                        except ValueError:
+                            pct = -1
+                        progress(pct, parts[2])
+                elif line:
+                    stderr_lines.append(line)
+
+        reader = threading.Thread(target=_drain_stderr, daemon=True)
+        reader.start()
+
+        # 1-hour timeout for very large STEP files
+        proc.wait(timeout=3600)
+        reader.join(timeout=10)
 
         if proc.returncode != 0:
+            err_detail = '\n'.join(stderr_lines).strip() or '(no error output captured)'
             raise RuntimeError(
-                f'gmsh worker failed (exit {proc.returncode}):\n'
-                + '\n'.join(stderr_lines)
+                f'gmsh worker failed (exit {proc.returncode}):\n{err_detail}'
             )
 
         stdout = proc.stdout.read()
         results = json.loads(stdout.strip())
         components: List[Component] = []
 
+        # ═══ Parallel .npy file loading ═══
+        import os
+        from concurrent.futures import ThreadPoolExecutor
+
         total = len(results)
-        for i, entry in enumerate(results):
+
+        def _load_entry(i_entry):
+            i, entry = i_entry
             dim = entry['dim']
             tag = entry['tag']
             name = entry['name']
-
             verts_file = tmp_path / f'verts_{dim}_{tag}.npy'
             faces_file = tmp_path / f'faces_{dim}_{tag}.npy'
-
             if verts_file.exists() and faces_file.exists():
                 vertices = np.load(str(verts_file))
                 faces = np.load(str(faces_file))
                 mesh = ComponentMesh(vertices=vertices, faces=faces)
             else:
                 mesh = None
+            return i, Component(tag=tag, dim=dim, name=name, mesh=mesh)
 
-            components.append(Component(
-                tag=tag,
-                dim=dim,
-                name=name,
-                mesh=mesh,
-            ))
+        n_workers = min(os.cpu_count() or 1, total, 8)
+        loaded = [None] * total
+        with ThreadPoolExecutor(max_workers=max(n_workers, 1)) as pool:
+            for i, comp in pool.map(_load_entry, enumerate(results)):
+                loaded[i] = comp
+                if progress:
+                    progress(95 + int(5 * (i + 1) / max(total, 1)),
+                             f'Reading mesh {i+1}/{total}…')
 
-            if progress:
-                progress(95 + int(5 * (i + 1) / max(total, 1)),
-                         f'Reading mesh {i+1}/{total}…')
+        components = [c for c in loaded if c is not None]
 
         return components
 
@@ -500,13 +565,15 @@ def _try_parse_binary_stl(
     raw: bytes,
     progress: Optional[ProgressCallback] = None,
 ) -> tuple:
-    """Try to parse as binary STL.  Returns (vertices, faces) or (None, None)."""
-    import struct as _struct
+    """Try to parse as binary STL.  Returns (vertices, faces) or (None, None).
 
+    Uses fully vectorized numpy operations for maximum throughput on
+    multi-million triangle files — no Python per-triangle loop.
+    """
     if len(raw) < 84:
         return None, None
 
-    ntri = _struct.unpack_from('<I', raw, 80)[0]
+    ntri = np.frombuffer(raw, dtype=np.uint32, count=1, offset=80)[0]
     expected = 84 + ntri * 50
     if len(raw) < expected:
         return None, None
@@ -516,40 +583,39 @@ def _try_parse_binary_stl(
         return None, None
 
     if progress:
-        progress(10, f'Parsing {ntri:,} triangles (binary STL)…')
+        progress(10, f'Parsing {ntri:,} triangles (binary STL, vectorized)…')
 
-    vertices: list = []
-    faces: list = []
-    offset = 84
-    report_every = max(ntri // 20, 1)
+    # ═══ Fully vectorized: parse all triangles at once ═══
+    # Each triangle record is 50 bytes:
+    #   12 bytes normal (3 floats) + 36 bytes vertices (9 floats) + 2 bytes attr
+    # We use a structured dtype to read all at once
+    tri_dtype = np.dtype([
+        ('normal', '<f4', (3,)),
+        ('v0', '<f4', (3,)),
+        ('v1', '<f4', (3,)),
+        ('v2', '<f4', (3,)),
+        ('attr', '<u2'),
+    ])
+    tri_data = np.frombuffer(raw, dtype=tri_dtype, count=ntri, offset=84)
 
-    for i in range(ntri):
-        # Skip normal (3 floats = 12 bytes), read 3 vertices (9 floats)
-        vals = _struct.unpack_from('<12f', raw, offset)
-        # vals[0:3] = normal, vals[3:6] = v0, vals[6:9] = v1, vals[9:12] = v2
-        base = len(vertices)
-        vertices.append(vals[3:6])
-        vertices.append(vals[6:9])
-        vertices.append(vals[9:12])
-        faces.append((base, base + 1, base + 2))
-        offset += 50   # 12*4 + 2 attribute bytes
-
-        if progress and (i % report_every == 0):
-            pct = 10 + int(80 * i / ntri)
-            progress(pct, f'Reading triangle {i+1:,}/{ntri:,}…')
-
-    # De-duplicate vertices for smaller memory footprint
     if progress:
-        progress(90, 'De-duplicating vertices…')
+        progress(40, f'Extracting {ntri:,} x 3 vertices…')
 
-    verts_arr = np.array(vertices, dtype=np.float64)
-    unique_verts, inverse = np.unique(verts_arr, axis=0, return_inverse=True)
-    new_faces = inverse[np.array(faces, dtype=np.int32).ravel()].reshape(-1, 3)
+    # Stack all vertices: (ntri, 3, 3) -> (ntri*3, 3)
+    all_verts = np.stack([tri_data['v0'], tri_data['v1'], tri_data['v2']], axis=1)
+    all_verts = all_verts.reshape(-1, 3).astype(np.float64)
+
+    if progress:
+        progress(60, 'De-duplicating vertices…')
+
+    # De-duplicate vertices
+    unique_verts, inverse = np.unique(all_verts, axis=0, return_inverse=True)
+    faces = inverse.reshape(-1, 3).astype(np.int32)
 
     if progress:
         progress(95, f'{len(unique_verts):,} unique vertices, {ntri:,} triangles')
 
-    return unique_verts.tolist(), new_faces.tolist()
+    return unique_verts.tolist(), faces.tolist()
 
 
 def _try_parse_ascii_stl(

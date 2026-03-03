@@ -10,7 +10,7 @@ from filelock import Timeout
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QVBoxLayout, QApplication
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QVBoxLayout, QApplication, QLabel
 from PySide6.QtCore import Signal, QEvent, QMargins, Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6QtAds import CDockManager, DockWidgetArea
@@ -114,6 +114,14 @@ class MainWindow(QMainWindow):
         self._dockManager.addDockWidget(DockWidgetArea.CenterDockWidgetArea, self._consoleView)
 
         self._ui.regionValidationMessage.hide()
+
+        # ── Status bar enhancements ──
+        self._statusStepLabel = QLabel('')
+        self._statusStepLabel.setStyleSheet('padding: 0 8px;')
+        self._ui.statusbar.addWidget(self._statusStepLabel, 1)
+
+        # Connect step changes to status bar
+        self._stepManager.displayStepChanged.connect(self._updateStatusStep)
 
         geometry = app.settings.getLastMainWindowGeometry()
         display = app.qApplication.primaryScreen().availableVirtualGeometry()
@@ -442,3 +450,12 @@ class MainWindow(QMainWindow):
 
     def _cellCountChanged(self, count: int):
         self._ui.cellCount.setText(f'{count:,}')
+
+    def _updateStatusStep(self, step):
+        """Update the status bar with the current meshing step."""
+        from baramMesh.view.main_window.naviagtion_view import _STEP_LABELS
+        label = _STEP_LABELS.get(step, '')
+        if label:
+            self._statusStepLabel.setText(f'\u25b8 {label}')
+        else:
+            self._statusStepLabel.setText('')

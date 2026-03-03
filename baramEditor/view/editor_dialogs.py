@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""Editor dialogs — TinkerCAD-style property panels for transform
+"""Editor dialogs — Fusion 360-style modal dialogs for transform
 operations, primitive insertion, boolean operations, and STL export.
+
+All dialogs inherit the parent CAD stylesheet via Qt cascading,
+with additional local styling for a cohesive dark-theme look.
 """
 
 from __future__ import annotations
@@ -14,17 +17,129 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QDoubleSpinBox, QComboBox, QDialogButtonBox, QLabel,
-    QPushButton, QLineEdit, QCheckBox, QWidget,
+    QPushButton, QLineEdit, QCheckBox, QWidget, QFrame,
 )
 
 from baramEditor.primitives import PrimitiveType
+from baramEditor.view.cad_style import (
+    ACCENT, ACCENT_HOVER, ACCENT_PRESSED,
+    BG_DARK, BG_PANEL, BG_INPUT, BG_HOVER, BORDER, TEXT, TEXT_DIM,
+)
 
 logger = logging.getLogger(__name__)
 
+# ──────────────────────────────────────────────────────────────
+# Shared dialog style — applied to every dialog in this module
+# ──────────────────────────────────────────────────────────────
 
-# ---------------------------------------------------------------------------
+_DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {BG_PANEL};
+    color: {TEXT};
+}}
+QLabel {{
+    color: {TEXT};
+    font-size: 12px;
+}}
+QGroupBox {{
+    color: {TEXT};
+    font-weight: bold;
+    font-size: 12px;
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    margin-top: 14px;
+    padding-top: 14px;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 2px 8px;
+    color: {ACCENT};
+}}
+QDoubleSpinBox, QLineEdit {{
+    background-color: {BG_INPUT};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 3px;
+    padding: 4px 6px;
+    min-height: 22px;
+}}
+QDoubleSpinBox:focus, QLineEdit:focus {{
+    border-color: {ACCENT};
+}}
+QComboBox {{
+    background-color: {BG_INPUT};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 3px;
+    padding: 4px 8px;
+    min-height: 22px;
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 20px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {BG_DARK};
+    color: {TEXT};
+    selection-background-color: {ACCENT};
+    border: 1px solid {BORDER};
+}}
+QCheckBox {{
+    color: {TEXT};
+    spacing: 6px;
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+}}
+QPushButton, QDialogButtonBox QPushButton {{
+    background-color: {BG_INPUT};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    padding: 6px 18px;
+    min-width: 72px;
+    font-weight: bold;
+}}
+QPushButton:hover {{
+    background-color: {BG_HOVER};
+    border-color: {ACCENT};
+}}
+QPushButton:pressed {{
+    background-color: {ACCENT_PRESSED};
+}}
+/* Primary action button (OK / Accept) */
+QPushButton[text="OK"], QPushButton[text="&OK"] {{
+    background-color: {ACCENT};
+    color: #FFF;
+    border-color: {ACCENT};
+}}
+QPushButton[text="OK"]:hover, QPushButton[text="&OK"]:hover {{
+    background-color: {ACCENT_HOVER};
+}}
+"""
+
+
+def _section_header(text: str) -> QLabel:
+    """Small accent-coloured section label."""
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f'color: {ACCENT}; font-size: 11px; font-weight: bold; '
+                      f'padding: 4px 0 2px 0;')
+    return lbl
+
+
+def _separator() -> QFrame:
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Sunken)
+    line.setStyleSheet(f'color: {BORDER};')
+    return line
+
+
+# ─────────────────────────────────────────────────────────────
 # Translate dialog
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 
 class TranslateDialog(QDialog):
     """Move a component by (dx, dy, dz)."""
@@ -32,9 +147,16 @@ class TranslateDialog(QDialog):
     def __init__(self, parent=None, name: str = ''):
         super().__init__(parent)
         self.setWindowTitle(f'Move — {name}' if name else 'Move')
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(340)
+        self.setStyleSheet(_DIALOG_STYLE)
 
-        layout = QFormLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(_section_header('DISPLACEMENT'))
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(6)
 
         self._dx = QDoubleSpinBox()
         self._dy = QDoubleSpinBox()
@@ -45,22 +167,25 @@ class TranslateDialog(QDialog):
             sb.setSingleStep(0.1)
             sb.setValue(0.0)
 
-        layout.addRow('ΔX:', self._dx)
-        layout.addRow('ΔY:', self._dy)
-        layout.addRow('ΔZ:', self._dz)
+        form.addRow('ΔX :', self._dx)
+        form.addRow('ΔY :', self._dy)
+        form.addRow('ΔZ :', self._dz)
+        layout.addLayout(form)
+
+        layout.addWidget(_separator())
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        layout.addWidget(buttons)
 
     def values(self) -> Tuple[float, float, float]:
         return self._dx.value(), self._dy.value(), self._dz.value()
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 # Rotate dialog
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 
 class RotateDialog(QDialog):
     """Rotate a component around an axis."""
@@ -68,9 +193,16 @@ class RotateDialog(QDialog):
     def __init__(self, parent=None, name: str = ''):
         super().__init__(parent)
         self.setWindowTitle(f'Rotate — {name}' if name else 'Rotate')
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(340)
+        self.setStyleSheet(_DIALOG_STYLE)
 
-        layout = QFormLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(_section_header('ROTATION'))
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(6)
 
         self._angle = QDoubleSpinBox()
         self._angle.setRange(-360, 360)
@@ -78,25 +210,28 @@ class RotateDialog(QDialog):
         self._angle.setSingleStep(15)
         self._angle.setValue(0.0)
         self._angle.setSuffix(' °')
-        layout.addRow('Angle:', self._angle)
+        form.addRow('Angle :', self._angle)
 
         self._axis = QComboBox()
         self._axis.addItems(['X', 'Y', 'Z'])
         self._axis.setCurrentIndex(2)
-        layout.addRow('Axis:', self._axis)
+        form.addRow('Axis :', self._axis)
+
+        layout.addLayout(form)
+        layout.addWidget(_separator())
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        layout.addWidget(buttons)
 
     def values(self) -> Tuple[float, str]:
         return self._angle.value(), self._axis.currentText().lower()
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 # Scale dialog
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 
 class ScaleDialog(QDialog):
     """Scale a component (uniform or per-axis)."""
@@ -104,16 +239,23 @@ class ScaleDialog(QDialog):
     def __init__(self, parent=None, name: str = ''):
         super().__init__(parent)
         self.setWindowTitle(f'Scale — {name}' if name else 'Scale')
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(340)
+        self.setStyleSheet(_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(_section_header('SCALE MODE'))
 
         self._uniform = QCheckBox('Uniform scale')
         self._uniform.setChecked(True)
         self._uniform.toggled.connect(self._onUniformToggled)
         layout.addWidget(self._uniform)
 
+        layout.addWidget(_section_header('FACTORS'))
+
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(6)
 
         self._sx = QDoubleSpinBox()
         self._sy = QDoubleSpinBox()
@@ -126,10 +268,12 @@ class ScaleDialog(QDialog):
 
         self._sx.valueChanged.connect(self._syncUniform)
 
-        form.addRow('X:', self._sx)
-        form.addRow('Y:', self._sy)
-        form.addRow('Z:', self._sz)
+        form.addRow('X :', self._sx)
+        form.addRow('Y :', self._sy)
+        form.addRow('Z :', self._sz)
         layout.addLayout(form)
+
+        layout.addWidget(_separator())
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -153,9 +297,9 @@ class ScaleDialog(QDialog):
         return self._sx.value(), self._sy.value(), self._sz.value()
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 # Mirror dialog
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 
 class MirrorDialog(QDialog):
     """Mirror across a plane."""
@@ -163,19 +307,29 @@ class MirrorDialog(QDialog):
     def __init__(self, parent=None, name: str = ''):
         super().__init__(parent)
         self.setWindowTitle(f'Mirror — {name}' if name else 'Mirror')
-        self.setMinimumWidth(260)
+        self.setMinimumWidth(320)
+        self.setStyleSheet(_DIALOG_STYLE)
 
-        layout = QFormLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(_section_header('MIRROR PLANE'))
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(6)
 
         self._plane = QComboBox()
-        self._plane.addItems(['XY (flip Z)', 'XZ (flip Y)', 'YZ (flip X)'])
+        self._plane.addItems(['XY  (flip Z)', 'XZ  (flip Y)', 'YZ  (flip X)'])
         self._plane.setCurrentIndex(0)
-        layout.addRow('Mirror plane:', self._plane)
+        form.addRow('Plane :', self._plane)
+        layout.addLayout(form)
+
+        layout.addWidget(_separator())
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        layout.addWidget(buttons)
 
     def plane(self) -> str:
         text = self._plane.currentText()
@@ -186,9 +340,9 @@ class MirrorDialog(QDialog):
         return 'yz'
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 # Add Primitive dialog
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 
 class AddPrimitiveDialog(QDialog):
     """Pick a primitive shape and its dimensions."""
@@ -196,49 +350,58 @@ class AddPrimitiveDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Add Shape')
-        self.setMinimumWidth(340)
+        self.setMinimumWidth(380)
+        self.setStyleSheet(_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(8)
 
-        # Shape selector
+        # ── Shape selector ──
+        layout.addWidget(_section_header('SHAPE'))
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(6)
 
         self._shapeCombo = QComboBox()
         for pt in PrimitiveType:
             self._shapeCombo.addItem(pt.name.capitalize(), userData=pt)
         self._shapeCombo.currentIndexChanged.connect(self._onShapeChanged)
-        form.addRow('Shape:', self._shapeCombo)
+        form.addRow('Type :', self._shapeCombo)
 
         self._nameEdit = QLineEdit()
         self._nameEdit.setPlaceholderText('Auto')
-        form.addRow('Name:', self._nameEdit)
-
+        form.addRow('Name :', self._nameEdit)
         layout.addLayout(form)
 
-        # Parameter group
+        # ── Parameters ──
         self._paramGroup = QGroupBox('Parameters')
         self._paramLayout = QFormLayout(self._paramGroup)
+        self._paramLayout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self._paramLayout.setSpacing(6)
         layout.addWidget(self._paramGroup)
 
-        # Common parameter spinboxes
-        self._xLen = self._addSpin('Width (X):', 1.0)
-        self._yLen = self._addSpin('Height (Y):', 1.0)
-        self._zLen = self._addSpin('Depth (Z):', 1.0)
-        self._radius = self._addSpin('Radius:', 0.5)
-        self._height = self._addSpin('Height:', 1.0)
-        self._ringRadius = self._addSpin('Ring radius:', 0.5)
-        self._tubeRadius = self._addSpin('Tube radius:', 0.15)
+        self._xLen = self._addSpin('Width (X) :', 1.0)
+        self._yLen = self._addSpin('Height (Y) :', 1.0)
+        self._zLen = self._addSpin('Depth (Z) :', 1.0)
+        self._radius = self._addSpin('Radius :', 0.5)
+        self._height = self._addSpin('Height :', 1.0)
+        self._ringRadius = self._addSpin('Ring radius :', 0.5)
+        self._tubeRadius = self._addSpin('Tube radius :', 0.15)
 
-        # Position
+        # ── Position ──
         posGroup = QGroupBox('Position')
         posLayout = QFormLayout(posGroup)
+        posLayout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        posLayout.setSpacing(6)
         self._cx = self._makeSpin(0.0, -1e6, 1e6)
         self._cy = self._makeSpin(0.0, -1e6, 1e6)
         self._cz = self._makeSpin(0.0, -1e6, 1e6)
-        posLayout.addRow('X:', self._cx)
-        posLayout.addRow('Y:', self._cy)
-        posLayout.addRow('Z:', self._cz)
+        posLayout.addRow('X :', self._cx)
+        posLayout.addRow('Y :', self._cy)
+        posLayout.addRow('Z :', self._cz)
         layout.addWidget(posGroup)
+
+        layout.addWidget(_separator())
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -262,7 +425,6 @@ class AddPrimitiveDialog(QDialog):
 
     def _onShapeChanged(self, idx: int):
         shape = self._shapeCombo.currentData()
-        # Hide all params first
         for sb in (self._xLen, self._yLen, self._zLen, self._radius,
                    self._height, self._ringRadius, self._tubeRadius):
             sb.setVisible(False)
@@ -270,7 +432,6 @@ class AddPrimitiveDialog(QDialog):
             if label:
                 label.setVisible(False)
 
-        # Show relevant params
         if shape == PrimitiveType.BOX:
             self._show(self._xLen, self._yLen, self._zLen)
         elif shape == PrimitiveType.CYLINDER:
@@ -325,9 +486,9 @@ class AddPrimitiveDialog(QDialog):
         return dict(center=c)
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 # Boolean operation dialog
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────
 
 class BooleanDialog(QDialog):
     """Pick two components and an operation."""
@@ -335,14 +496,21 @@ class BooleanDialog(QDialog):
     def __init__(self, parent=None, component_names: list[tuple[int, str]] = None):
         super().__init__(parent)
         self.setWindowTitle('Boolean Operation')
-        self.setMinimumWidth(340)
+        self.setMinimumWidth(380)
+        self.setStyleSheet(_DIALOG_STYLE)
         component_names = component_names or []
 
-        layout = QFormLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(_section_header('BOOLEAN'))
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(6)
 
         self._opCombo = QComboBox()
-        self._opCombo.addItems(['Union (A + B)', 'Subtract (A − B)', 'Intersect (A ∩ B)'])
-        layout.addRow('Operation:', self._opCombo)
+        self._opCombo.addItems(['Union  (A + B)', 'Subtract  (A \u2212 B)', 'Intersect  (A \u2229 B)'])
+        form.addRow('Operation :', self._opCombo)
 
         self._comboA = QComboBox()
         self._comboB = QComboBox()
@@ -351,13 +519,16 @@ class BooleanDialog(QDialog):
             self._comboB.addItem(name, userData=tag)
         if len(component_names) > 1:
             self._comboB.setCurrentIndex(1)
-        layout.addRow('Component A:', self._comboA)
-        layout.addRow('Component B:', self._comboB)
+        form.addRow('Component A :', self._comboA)
+        form.addRow('Component B :', self._comboB)
+
+        layout.addLayout(form)
+        layout.addWidget(_separator())
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        layout.addWidget(buttons)
 
     def operation_index(self) -> int:
         """0=union, 1=subtract, 2=intersect."""

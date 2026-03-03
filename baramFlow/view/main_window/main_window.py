@@ -15,7 +15,7 @@ from PySide6.QtGui import QAction, QActionGroup
 import qasync
 import asyncio
 
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QToolBar, QLabel, QWidget, QSizePolicy
 from PySide6.QtCore import QCoreApplication, Qt, QEvent, QTimer
 from PySide6.QtWidgets import QApplication
 
@@ -185,6 +185,8 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
 
         self._backgroundTasks = set()
 
+        self._setupToolbar()
+        self._setupStatusBar()
         self._setupShortcuts()
 
         self._setupThemeMenu()
@@ -200,6 +202,100 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
         self._ui.splitter.setStretchFactor(2, 1)
 
         self._docks: dict[UUID, GraphicDock] = {}
+
+    # ── Quick-access toolbar ────────────────────────────────────
+    def _setupToolbar(self):
+        tb = QToolBar(self.tr('Quick Access'), self)
+        tb.setObjectName('quickAccessToolbar')
+        tb.setMovable(False)
+        tb.setIconSize(tb.iconSize())  # use default icon size
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+
+        self._tbActionSave = tb.addAction('\U0001f4be ' + self.tr('Save'))
+        self._tbActionSave.setToolTip(self.tr('Save project (Ctrl+S)'))
+        self._tbActionSave.setShortcut('Ctrl+S')
+        self._tbActionSave.triggered.connect(self._save)
+
+        tb.addSeparator()
+
+        self._tbActionLoadMesh = tb.addAction('\U0001f4c2 ' + self.tr('Load Mesh'))
+        self._tbActionLoadMesh.setToolTip(self.tr('Import an OpenFOAM mesh'))
+        self._tbActionLoadMesh.triggered.connect(self._importOpenFOAMMesh)
+
+        self._tbActionMeshInfo = tb.addAction('\u2139 ' + self.tr('Mesh Info'))
+        self._tbActionMeshInfo.setToolTip(self.tr('View mesh statistics'))
+        self._tbActionMeshInfo.triggered.connect(self._openMeshInfoDialog)
+
+        tb.addSeparator()
+
+        self._tbActionRun = tb.addAction('\u25b6 ' + self.tr('Run'))
+        self._tbActionRun.setToolTip(self.tr('Go to Run page'))
+        self._tbActionRun.triggered.connect(
+            lambda: self._navigatorView.setCurrentMenu(MenuItem.MENU_SOLUTION_RUN.value))
+
+        self._tbActionParallel = tb.addAction('\u2699 ' + self.tr('Parallel'))
+        self._tbActionParallel.setToolTip(self.tr('Parallel environment (Ctrl+P)'))
+        self._tbActionParallel.triggered.connect(self._openParallelEnvironmentDialog)
+
+        # Spacer pushes the right-side items to the far right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        tb.addWidget(spacer)
+
+        self._tbActionParaView = tb.addAction('\U0001f50d ' + self.tr('ParaView'))
+        self._tbActionParaView.setToolTip(self.tr('Open results in ParaView'))
+        self._tbActionParaView.triggered.connect(self._paraViewActionTriggered)
+
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
+        self._toolbar = tb
+
+    # ── Status bar info ─────────────────────────────────────────
+    def _setupStatusBar(self):
+        sb = self._ui.statusbar
+        self._statusSectionLabel = QLabel('')
+        self._statusMeshLabel = QLabel(self.tr('No mesh loaded'))
+        self._statusSolverLabel = QLabel('')
+
+        for lbl in (self._statusSectionLabel, self._statusMeshLabel, self._statusSolverLabel):
+            lbl.setStyleSheet('padding: 0 8px;')
+
+        sb.addWidget(self._statusSectionLabel, 1)
+        sb.addPermanentWidget(self._statusMeshLabel)
+        sb.addPermanentWidget(self._statusSolverLabel)
+
+    def _updateStatusSection(self, menuItem):
+        """Update status bar with current navigation path."""
+        texts = self._navigatorView._menuTexts
+        if menuItem in texts:
+            section = texts[menuItem]()
+        else:
+            section = ''
+        self._statusSectionLabel.setText(f'  \u25b8 {section}')
+
+    def _updateStatusMesh(self):
+        """Update mesh info in status bar."""
+        db = coredb.CoreDB()
+        if db.hasMesh():
+            regions = db.getRegions()
+            n = len(regions)
+            if n <= 1:
+                self._statusMeshLabel.setText(self.tr('Mesh loaded'))
+            else:
+                self._statusMeshLabel.setText(self.tr(f'Mesh loaded ({n} regions)'))
+        else:
+            self._statusMeshLabel.setText(self.tr('No mesh loaded'))
+
+    def _updateStatusSolver(self, status):
+        """Update solver status in status bar."""
+        if status == SolverStatus.RUNNING:
+            self._statusSolverLabel.setText('\u25cf ' + self.tr('Running'))
+            self._statusSolverLabel.setStyleSheet('color: #5aba5a; padding: 0 8px;')
+        elif status == SolverStatus.ENDED:
+            self._statusSolverLabel.setText('\u25a0 ' + self.tr('Stopped'))
+            self._statusSolverLabel.setStyleSheet('color: #cc6666; padding: 0 8px;')
+        else:
+            self._statusSolverLabel.setText('')
+            self._statusSolverLabel.setStyleSheet('padding: 0 8px;')
 
     def _setupThemeMenu(self):
         self._themeActionGroup = QActionGroup(self)
@@ -332,6 +428,7 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
         self._ui.actionTutorials.triggered.connect(self._openTutorials)
 
         self._navigatorView.currentMenuChanged.connect(self._changeForm)
+        self._navigatorView.currentMenuChanged.connect(lambda menu, _prev: self._updateStatusSection(menu))
 
         self._project.projectOpened.connect(self._projectOpened)
         self._project.solverStatusChanged.connect(self._solverStatusChanged)
@@ -653,6 +750,7 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
         # self._ui.menuMesh.setEnabled(True)
         # self._ui.menuParallel.setEnabled(True)
         self._navigatorView.updateEnabled()
+        self._updateStatusMesh()
 
         targets = [
             MenuItem.MENU_SETUP_MODELS.value,
@@ -683,7 +781,13 @@ class MainWindow(QMainWindow, expert_mode.IExpertModeObserver):
         self._ui.menuParallel.setDisabled(solverRunning)
         self._ui.actionCloseProject.setDisabled(batchRunning)
 
+        # Update toolbar state
+        self._tbActionLoadMesh.setEnabled(not solverRunning)
+        self._tbActionParallel.setEnabled(not solverRunning)
+
         self._navigatorView.updateEnabled()
+
+        self._updateStatusSolver(status)
 
         if status == SolverStatus.ENDED and liveStatusChanged:
             await AsyncMessageBox().information(self, self.tr('Calculation Terminated'),

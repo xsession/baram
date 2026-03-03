@@ -15,6 +15,8 @@ from vtkmodules.vtkRenderingLOD import vtkQuadricLODActor
 
 from baramFlow.app import app
 from baramFlow.coredb import coredb
+from baramFlow.coredb.boundary_db import BoundaryDB
+from baramFlow.mesh.bc_colors import get_bc_color
 from baramFlow.openfoam import parallel
 from baramFlow.openfoam.file_system import FileSystem
 from baramFlow.openfoam.system.fv_schemes import FvSchemes
@@ -117,10 +119,19 @@ class ActorInfo:
         self._dataSet = dataSet
         self._face = None
         self._feature = None
+        self._bcColor = None   # (R,G,B) from BC type coloring
 
         self._face = getActor(dataSet)
         if dataSet.GetDataObjectType() == VTK_POLY_DATA:
             self._feature = getFeatureActor(dataSet)
+
+    @property
+    def bcColor(self):
+        return self._bcColor
+
+    @bcColor.setter
+    def bcColor(self, color):
+        self._bcColor = color
 
     @property
     def face(self):
@@ -169,6 +180,7 @@ class MeshModel(RenderingModel):
         self._hasFeatures = True
         self._bounds = None
         self._activation = False
+        self._bcColorMode = False   # FlowEFD-style BC type coloring
 
         self._numCells = None
         self._smallestCellVolume = None
@@ -234,6 +246,57 @@ class MeshModel(RenderingModel):
     def setCurrentId(self, id_):
         self._highlightActor(id_)
         self._currentId = id_
+
+    # ─── BC-type color coding (FlowEFD style) ───────────────────
+
+    @property
+    def bcColorMode(self) -> bool:
+        return self._bcColorMode
+
+    def setBCColorMode(self, enabled: bool):
+        """Toggle FlowEFD-style boundary-type coloring."""
+        self._bcColorMode = enabled
+        if enabled:
+            self._applyBCColors()
+        else:
+            self._removeBCColors()
+
+    def refreshBCColors(self):
+        """Re-apply BC colors after type changes."""
+        if self._bcColorMode:
+            self._applyBCColors()
+
+    def _applyBCColors(self):
+        """Color each boundary actor by its BC type."""
+        db = coredb.CoreDB()
+        for bcid, actorInfo in self._actorInfos.items():
+            try:
+                bctype = BoundaryDB.getBoundaryType(bcid)
+                color = get_bc_color(bctype)
+                actorInfo.bcColor = color
+                actor = actorInfo.actor(self._featureMode)
+                if actor and bcid != self._currentId:
+                    actor.GetProperty().SetColor(*color)
+                    actor.GetProperty().SetOpacity(0.85)
+            except Exception:
+                pass
+        if self._view:
+            self._view.refresh()
+
+    def _removeBCColors(self):
+        """Restore default Gainsboro coloring."""
+        renderingMode = self._view.renderingMode() if self._view else DisplayMode.DISPLAY_MODE_SURFACE_EDGE
+        for bcid, actorInfo in self._actorInfos.items():
+            actorInfo.bcColor = None
+            actor = actorInfo.actor(self._featureMode)
+            if actor:
+                if bcid == self._currentId:
+                    _applyHighlight(actor)
+                else:
+                    _applyDisplayMode[renderingMode](actor)
+                actor.GetProperty().SetOpacity(1.0)
+        if self._view:
+            self._view.refresh()
 
     def showCulling(self):
         for a in self._actorInfos.values():
@@ -320,6 +383,18 @@ class MeshModel(RenderingModel):
     def _applyDisplayMode(self, actor):
         if actor == self.currentActor():
             _applyHighlight(actor)
+        elif self._bcColorMode:
+            # Preserve BC-type color
+            for actorInfo in self._actorInfos.values():
+                if actorInfo.actor(self._featureMode) == actor and actorInfo.bcColor:
+                    actor.GetProperty().SetColor(*actorInfo.bcColor)
+                    actor.GetProperty().SetRepresentationToSurface()
+                    actor.GetProperty().EdgeVisibilityOn()
+                    actor.GetProperty().SetEdgeColor(0.3, 0.3, 0.3)
+                    actor.GetProperty().SetLineWidth(1.0)
+                    actor.GetProperty().SetOpacity(0.85)
+                    return
+            _applyDisplayMode[self._view.renderingMode()](actor)
         else:
             _applyDisplayMode[self._view.renderingMode()](actor)
 

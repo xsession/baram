@@ -1,8 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""Main window for BaramEditor — Fusion 360-style CAD component viewer
-with a component tree, 3D viewer, modification history, and menus.
+"""Main window for BaramEditor — Fusion 360 / Plasticity-style layout.
+
+Layout:
+  ┌──────────────────── Toolbar Ribbon ────────────────────────┐
+  │  File  │  Create  │  Modify  │  Boolean │  View  │  Help  │
+  ├────────┬──────────────────────────────────────┬────────────┤
+  │  Left  │                                      │   Right    │
+  │ Panel  │          3D Viewport                  │  Panel     │
+  │(Comps) │  (floating viewport toolbar overlay)  │(Properties)│
+  ├────────┴──────────────────────────────────────┴────────────┤
+  │              Timeline (horizontal history strip)            │
+  ├────────────────────── Status Bar ──────────────────────────┤
+  └────────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -15,22 +26,23 @@ from typing import Optional
 
 import qasync
 from PySide6.QtCore import Qt, QEvent, QObject, Signal as QtSignal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
 from PySide6.QtWidgets import (
     QMainWindow, QApplication, QFileDialog, QMessageBox,
-    QDockWidget, QSplitter, QWidget, QVBoxLayout, QStatusBar,
-    QToolBar, QLabel,
+    QDockWidget, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
+    QStatusBar, QToolBar, QLabel, QToolButton, QFrame,
 )
 
-from libbaram.qt_utils import apply_dark_mode_stylesheet
 from widgets.async_message_box import AsyncMessageBox
 from widgets.progress_dialog import ProgressDialog
 
 from baramEditor.app import app
 from baramEditor.cad_document import CADDocument, Component, ComponentMesh, Modification
+from baramEditor.view.cad_style import CAD_STYLESHEET
 from baramEditor.view.cad_viewer import CADViewer
 from baramEditor.view.component_tree import ComponentTree
-from baramEditor.view.history_panel import HistoryPanel
+from baramEditor.view.properties_panel import PropertiesPanel
+from baramEditor.view.timeline_panel import TimelinePanel
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +54,20 @@ class _ProgressBridge(QObject):
     messageChanged = QtSignal(str)
 
     def callback(self, pct: int, msg: str):
-        """Call this from any thread — the connected slots run on the GUI thread."""
         self.percentChanged.emit(pct)
         self.messageChanged.emit(msg)
 
 
+def _toolbar_separator_label(text: str) -> QLabel:
+    """Small dim group label for toolbar sections."""
+    lbl = QLabel(text)
+    lbl.setStyleSheet('color: #666; font-size: 9px; padding: 0 2px;')
+    return lbl
+
+
 class MainWindow(QMainWindow):
-    """Top-level window that wires up the viewer, tree, history,
-    and all menu / toolbar actions."""
+    """Fusion 360-style main window with ribbon toolbar, side panels,
+    central viewport, and bottom timeline."""
 
     def __init__(self):
         super().__init__()
@@ -59,38 +77,109 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(app.properties.fullName)
         self.setWindowIcon(app.properties.icon())
-        self.resize(1400, 900)
+        self.resize(1600, 950)
 
-        # --- Central widget: 3D viewer ---
-        self._viewer = CADViewer()
-        self.setCentralWidget(self._viewer)
+        # ═══ Apply stylesheet ═══
+        self.setStyleSheet(CAD_STYLESHEET)
 
-        # --- Component tree dock (left) ---
+        # ═══ Central area: splitter with 3 panels ═══
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+
+        # Horizontal splitter: [left panel | viewport | right panel]
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(2)
+
+        # Left panel: Component browser
         self._componentTree = ComponentTree()
-        self._treeDock = QDockWidget('Components', self)
-        self._treeDock.setWidget(self._componentTree)
-        self._treeDock.setMinimumWidth(260)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._treeDock)
+        self._splitter.addWidget(self._componentTree)
 
-        # --- History dock (right) ---
-        self._historyPanel = HistoryPanel()
-        self._historyDock = QDockWidget('History', self)
-        self._historyDock.setWidget(self._historyPanel)
-        self._historyDock.setMinimumWidth(220)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._historyDock)
+        # Centre: 3D Viewer
+        self._viewer = CADViewer()
+        self._splitter.addWidget(self._viewer)
 
-        # --- Status bar ---
-        self._statusLabel = QLabel('No file loaded')
+        # Right panel: Properties inspector
+        self._propertiesPanel = PropertiesPanel()
+        self._splitter.addWidget(self._propertiesPanel)
+
+        # Splitter proportions: left=280, center=stretch, right=280
+        self._splitter.setStretchFactor(0, 0)
+        self._splitter.setStretchFactor(1, 1)
+        self._splitter.setStretchFactor(2, 0)
+        self._splitter.setSizes([280, 900, 280])
+
+        central_layout.addWidget(self._splitter, 1)
+
+        # Bottom: Timeline
+        self._timeline = TimelinePanel()
+        central_layout.addWidget(self._timeline)
+
+        self.setCentralWidget(central)
+
+        # ═══ Status bar ═══
+        self._statusLabel = QLabel('  Ready — Import a CAD or STL file to begin')
         self.statusBar().addWidget(self._statusLabel, 1)
+
         self._triLabel = QLabel()
         self.statusBar().addPermanentWidget(self._triLabel)
 
-        # --- Menus & toolbar ---
+        self._coordLabel = QLabel()
+        self.statusBar().addPermanentWidget(self._coordLabel)
+
+        # ═══ Menus & toolbar ═══
         self._buildMenus()
         self._buildToolbar()
 
-        # --- Wire signals ---
+        # ═══ Wire signals ═══
         self._connectSignals()
+
+    # ====================================================================
+    # Toolbar ribbon (Fusion 360 style with grouped sections)
+    # ====================================================================
+
+    def _buildToolbar(self):
+        tb = self.addToolBar('Main')
+        tb.setMovable(False)
+        tb.setIconSize(self.fontMetrics().size(0, 'WW') * 1.2)
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+
+        # ── File group ──
+        tb.addWidget(_toolbar_separator_label('FILE'))
+        tb.addAction(self._actImport)
+        tb.addAction(self._actExportSTL)
+        tb.addAction(self._actSaveProject)
+        tb.addSeparator()
+
+        # ── Edit group ──
+        tb.addWidget(_toolbar_separator_label('EDIT'))
+        tb.addAction(self._actUndo)
+        tb.addAction(self._actRedo)
+        tb.addSeparator()
+
+        # ── Create group ──
+        tb.addWidget(_toolbar_separator_label('CREATE'))
+        tb.addAction(self._actAddShape)
+        tb.addAction(self._actDuplicate)
+        tb.addSeparator()
+
+        # ── Modify group ──
+        tb.addWidget(_toolbar_separator_label('MODIFY'))
+        tb.addAction(self._actMove)
+        tb.addAction(self._actRotate)
+        tb.addAction(self._actScale)
+        tb.addAction(self._actMirror)
+        tb.addSeparator()
+
+        # ── Boolean group ──
+        tb.addWidget(_toolbar_separator_label('BOOLEAN'))
+        tb.addAction(self._actBoolean)
+        tb.addSeparator()
+
+        # ── View group ──
+        tb.addWidget(_toolbar_separator_label('VIEW'))
+        tb.addAction(self._actFitAll)
 
     # ====================================================================
     # Menus
@@ -99,66 +188,73 @@ class MainWindow(QMainWindow):
     def _buildMenus(self):
         menubar = self.menuBar()
 
-        # -- File --
+        # ── File ──
         file_menu = menubar.addMenu('&File')
-        self._actImport = file_menu.addAction('&Import CAD / STL …')
+        self._actImport = file_menu.addAction('&Import...')
         self._actImport.setShortcut(QKeySequence('Ctrl+I'))
-        self._actExportSTL = file_menu.addAction('E&xport STL …')
+        self._actImport.setToolTip('Import CAD / STL file')
+
+        self._actExportSTL = file_menu.addAction('&Export STL...')
         self._actExportSTL.setShortcut(QKeySequence('Ctrl+E'))
         self._actExportSTL.setEnabled(False)
+
         file_menu.addSeparator()
+
         self._actSaveProject = file_menu.addAction('&Save Project')
         self._actSaveProject.setShortcut(QKeySequence.StandardKey.Save)
         self._actSaveProject.setEnabled(False)
-        self._actOpenProject = file_menu.addAction('&Open Project …')
+
+        self._actOpenProject = file_menu.addAction('&Open Project...')
         self._actOpenProject.setShortcut(QKeySequence.StandardKey.Open)
+
         file_menu.addSeparator()
         self._actExit = file_menu.addAction('E&xit')
         self._actExit.setShortcut(QKeySequence('Ctrl+Q'))
 
-        # -- Edit --
+        # ── Edit ──
         edit_menu = menubar.addMenu('&Edit')
         self._actUndo = edit_menu.addAction('&Undo')
         self._actUndo.setShortcut(QKeySequence.StandardKey.Undo)
         self._actUndo.setEnabled(False)
+
         self._actRedo = edit_menu.addAction('&Redo')
         self._actRedo.setShortcut(QKeySequence.StandardKey.Redo)
         self._actRedo.setEnabled(False)
         edit_menu.addSeparator()
 
-        self._actAddShape = edit_menu.addAction('Add &Shape …')
+        self._actAddShape = edit_menu.addAction('Add &Shape...')
         self._actAddShape.setShortcut(QKeySequence('Ctrl+Shift+A'))
+
         self._actDuplicate = edit_menu.addAction('&Duplicate')
         self._actDuplicate.setShortcut(QKeySequence('Ctrl+D'))
         edit_menu.addSeparator()
 
-        self._actMove = edit_menu.addAction('&Move …')
+        self._actMove = edit_menu.addAction('&Move...')
         self._actMove.setShortcut(QKeySequence('G'))
-        self._actRotate = edit_menu.addAction('&Rotate …')
+
+        self._actRotate = edit_menu.addAction('&Rotate...')
         self._actRotate.setShortcut(QKeySequence('R'))
-        self._actScale = edit_menu.addAction('Sca&le …')
+
+        self._actScale = edit_menu.addAction('Sca&le...')
         self._actScale.setShortcut(QKeySequence('S'))
-        self._actMirror = edit_menu.addAction('M&irror …')
+
+        self._actMirror = edit_menu.addAction('M&irror...')
         edit_menu.addSeparator()
 
-        self._actBoolean = edit_menu.addAction('&Boolean …')
+        self._actBoolean = edit_menu.addAction('&Boolean...')
         self._actBoolean.setShortcut(QKeySequence('Ctrl+B'))
 
-        # Disable editing actions when no document loaded (except Add Shape)
         for act in (self._actDuplicate, self._actMove,
                      self._actRotate, self._actScale, self._actMirror,
                      self._actBoolean):
             act.setEnabled(False)
 
-        # -- View --
+        # ── View ──
         view_menu = menubar.addMenu('&View')
-        view_menu.addAction(self._treeDock.toggleViewAction())
-        view_menu.addAction(self._historyDock.toggleViewAction())
-        view_menu.addSeparator()
         self._actFitAll = view_menu.addAction('&Fit All')
         self._actFitAll.setShortcut(QKeySequence('F'))
 
-        # -- Settings --
+        # ── Settings ──
         settings_menu = menubar.addMenu('&Settings')
 
         self._themeGroup = QActionGroup(self)
@@ -179,30 +275,9 @@ class MainWindow(QMainWindow):
         else:
             self._actLightMode.setChecked(True)
 
-        # -- Help --
+        # ── Help ──
         help_menu = menubar.addMenu('&Help')
         self._actAbout = help_menu.addAction('&About')
-
-    def _buildToolbar(self):
-        tb = self.addToolBar('Main')
-        tb.setMovable(False)
-        tb.addAction(self._actImport)
-        tb.addAction(self._actExportSTL)
-        tb.addAction(self._actSaveProject)
-        tb.addSeparator()
-        tb.addAction(self._actUndo)
-        tb.addAction(self._actRedo)
-        tb.addSeparator()
-        tb.addAction(self._actAddShape)
-        tb.addAction(self._actDuplicate)
-        tb.addAction(self._actBoolean)
-        tb.addSeparator()
-        tb.addAction(self._actMove)
-        tb.addAction(self._actRotate)
-        tb.addAction(self._actScale)
-        tb.addAction(self._actMirror)
-        tb.addSeparator()
-        tb.addAction(self._actFitAll)
 
     # ====================================================================
     # Signals wiring
@@ -252,10 +327,15 @@ class MainWindow(QMainWindow):
         self._componentTree.scaleRequested.connect(self._onScaleTag)
         self._componentTree.mirrorRequested.connect(self._onMirrorTag)
 
-        # History panel
-        self._historyPanel.undoRequested.connect(self._onUndo)
-        self._historyPanel.redoRequested.connect(self._onRedo)
-        self._historyPanel.jumpRequested.connect(self._onHistoryJump)
+        # Properties panel
+        self._propertiesPanel.renameRequested.connect(self._onRename)
+        self._propertiesPanel.colourRequested.connect(self._onColourChanged)
+        self._propertiesPanel.opacityChanged.connect(self._onOpacityChanged)
+
+        # Timeline
+        self._timeline.undoRequested.connect(self._onUndo)
+        self._timeline.redoRequested.connect(self._onRedo)
+        self._timeline.jumpRequested.connect(self._onHistoryJump)
 
         # Viewer
         self._viewer.componentPicked.connect(self._onViewerPick)
@@ -266,7 +346,7 @@ class MainWindow(QMainWindow):
 
     def _setTheme(self, dark: bool):
         app.settings.setDarkModeEnabled(dark)
-        apply_dark_mode_stylesheet(QApplication.instance(), dark)
+        # Keep our custom CAD stylesheet, just update VTK bg
         self._viewer.apply_theme(dark)
 
     # ====================================================================
@@ -289,15 +369,13 @@ class MainWindow(QMainWindow):
 
         file_name = Path(path).name
 
-        # Show a progress dialog with a real percentage bar
         progressDlg = ProgressDialog(self, f'Importing {file_name}', cancelable=False)
         progressDlg.setRange(0, 100)
         progressDlg.setPercent(0)
-        progressDlg.setLabelText(f'Loading {file_name} …')
+        progressDlg.setLabelText(f'Loading {file_name}...')
         progressDlg.open()
         QApplication.processEvents()
 
-        # Thread-safe bridge: worker thread emits signals → GUI thread updates dialog
         bridge = _ProgressBridge()
         bridge.percentChanged.connect(progressDlg.setPercent, Qt.ConnectionType.QueuedConnection)
         bridge.messageChanged.connect(progressDlg.setLabelText, Qt.ConnectionType.QueuedConnection)
@@ -313,7 +391,7 @@ class MainWindow(QMainWindow):
             await AsyncMessageBox().information(
                 self, 'Import Error', f'Could not load file:\n{e}',
             )
-            self._statusLabel.setText('Import failed')
+            self._statusLabel.setText('  Import failed')
             return
 
         progressDlg.close()
@@ -323,7 +401,7 @@ class MainWindow(QMainWindow):
         n = len(doc.components)
         total_tris = sum(c.mesh.triangle_count() for c in doc.components if c.mesh)
         self._statusLabel.setText(
-            f'{file_name}  —  {n} component{"s" if n != 1 else ""},  {total_tris:,} triangles'
+            f'  {file_name}  \u2014  {n} component{"s" if n != 1 else ""},  {total_tris:,} triangles'
         )
         self._actSaveProject.setEnabled(True)
 
@@ -341,7 +419,7 @@ class MainWindow(QMainWindow):
 
         try:
             self._document.save_project(self._projectPath)
-            self._statusLabel.setText(f'Saved to {self._projectPath.name}')
+            self._statusLabel.setText(f'  Saved to {self._projectPath.name}')
         except Exception as e:
             logger.exception('Failed to save project')
             QMessageBox.warning(self, 'Save Error', f'Could not save:\n{e}')
@@ -368,7 +446,7 @@ class MainWindow(QMainWindow):
         self._document = doc
         self._projectPath = Path(path)
         self._setDocument(doc)
-        self._statusLabel.setText(f'{Path(path).name}  —  {len(doc.components)} components')
+        self._statusLabel.setText(f'  {Path(path).name}  \u2014  {len(doc.components)} components')
         self._actSaveProject.setEnabled(True)
 
     # ====================================================================
@@ -378,7 +456,8 @@ class MainWindow(QMainWindow):
     def _setDocument(self, doc: CADDocument):
         self._viewer.set_document(doc)
         self._componentTree.set_document(doc)
-        self._historyPanel.set_document(doc)
+        self._timeline.set_document(doc)
+        self._propertiesPanel.clear()
         self._viewer.fit_camera()
         self._updateUndoRedo()
         self._updateTriangleCount()
@@ -396,25 +475,29 @@ class MainWindow(QMainWindow):
             return
         self._actUndo.setEnabled(self._document.history.can_undo)
         self._actRedo.setEnabled(self._document.history.can_redo)
-        self._historyPanel.refresh_buttons()
+        self._timeline.refresh_buttons()
 
     def _updateTriangleCount(self):
         if self._document is None:
             self._triLabel.clear()
             return
         total = sum(c.mesh.triangle_count() for c in self._document.components if c.mesh)
-        self._triLabel.setText(f'{total:,} triangles')
+        self._triLabel.setText(f'  {total:,} \u25B3  ')
 
     # ====================================================================
-    # Edit operations  (each pushes to history via CADDocument)
+    # Edit operations
     # ====================================================================
 
     def _afterEdit(self, comp: Component, mod: Modification):
         """Common update after any edit operation."""
         self._viewer.update_component(comp)
         self._componentTree.update_component(comp)
-        self._historyPanel.append_modification(mod)
+        self._timeline.append_modification(mod)
         self._updateUndoRedo()
+        self._updateTriangleCount()
+        # Update properties panel if this is the selected component
+        if self._propertiesPanel._component and self._propertiesPanel._component.tag == comp.tag:
+            self._propertiesPanel.set_component(comp)
 
     def _onVisibilityChanged(self, tag: int, visible: bool):
         if self._document is None:
@@ -461,8 +544,21 @@ class MainWindow(QMainWindow):
         comp = self._document.component_by_tag(tag)
         self._afterEdit(comp, mod)
 
+    def _onOpacityChanged(self, tag: int, alpha: float):
+        """Handle opacity change from properties panel."""
+        if self._document is None:
+            return
+        comp = self._document.component_by_tag(tag)
+        if comp is None:
+            return
+        new_colour = (comp.colour[0], comp.colour[1], comp.colour[2], alpha)
+        mod = self._document.set_colour(tag, new_colour)
+        if mod is None:
+            return
+        comp = self._document.component_by_tag(tag)
+        self._afterEdit(comp, mod)
+
     def _onIsolate(self, tag: int):
-        """Show only the given component, hide all others."""
         if self._document is None:
             return
         for comp in self._document.components:
@@ -471,11 +567,7 @@ class MainWindow(QMainWindow):
             should_be_visible = (comp.tag == tag)
             if comp.visible != should_be_visible:
                 self._document.set_visible(comp.tag, should_be_visible)
-        # Full refresh after batch operation
-        self._viewer.refresh_all()
-        self._componentTree.rebuild()
-        self._historyPanel.rebuild()
-        self._updateUndoRedo()
+        self._fullRefresh()
 
     def _onShowAll(self):
         if self._document is None:
@@ -483,21 +575,16 @@ class MainWindow(QMainWindow):
         for comp in self._document.components:
             if not comp.visible and not comp.deleted:
                 self._document.set_visible(comp.tag, True)
-        self._viewer.refresh_all()
-        self._componentTree.rebuild()
-        self._historyPanel.rebuild()
-        self._updateUndoRedo()
+        self._fullRefresh()
 
     # ====================================================================
-    # New editing operations  (TinkerCAD-style)
+    # Create / Modify operations
     # ====================================================================
 
     def _selectedTag(self) -> Optional[int]:
-        """Return the currently selected component tag, or None."""
         return self._componentTree.selected_tag()
 
     def _requireSelection(self) -> Optional[int]:
-        """Return selected tag or show a warning and return None."""
         tag = self._selectedTag()
         if tag is None:
             QMessageBox.information(self, 'No Selection',
@@ -505,7 +592,6 @@ class MainWindow(QMainWindow):
         return tag
 
     def _onAddShape(self):
-        # Allow adding shapes even without a loaded document — create one on the fly
         if self._document is None:
             self._document = CADDocument()
             self._setDocument(self._document)
@@ -519,14 +605,13 @@ class MainWindow(QMainWindow):
 
         ptype = dlg.primitive_type()
         name = dlg.name()
-        params = dlg.params()  # includes center
+        params = dlg.params()
 
         factory = PRIMITIVE_FACTORIES.get(ptype)
         if factory is None:
             return
 
         verts, faces = factory(**params)
-
         mesh = ComponentMesh(vertices=verts, faces=faces)
         comp, mod = self._document.add_component(name=name, dim=3, mesh=mesh)
         if comp is not None and mod is not None:
@@ -610,7 +695,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, 'Boolean', 'At least two components are required.')
             return
-        dlg = BooleanDialog(comps, self)
+        comp_names = [(c.tag, c.name) for c in comps]
+        dlg = BooleanDialog(self, comp_names)
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
         tag_a = dlg.tag_a()
@@ -638,7 +724,6 @@ class MainWindow(QMainWindow):
             return
         tag = self._selectedTag()
         if tag is None:
-            # Export all visible components
             comps = [c for c in self._document.components
                      if not c.deleted and c.visible and c.mesh]
         else:
@@ -666,20 +751,20 @@ class MainWindow(QMainWindow):
             writer.SetFileName(path)
             writer.SetInputData(appender.GetOutput())
             writer.Write()
-            self._statusLabel.setText(f'Exported to {Path(path).name}')
+            self._statusLabel.setText(f'  Exported to {Path(path).name}')
         except Exception as e:
             logger.exception('STL export failed')
             QMessageBox.warning(self, 'Export Error', f'Export failed:\n{e}')
 
     def _afterAddComponent(self, comp: Component, mod: Modification):
-        """Refresh after a new component is added (primitive, duplicate, mirror, boolean)."""
+        """Refresh after a new component is added."""
         self._viewer.add_new_component(comp)
         self._componentTree.rebuild()
-        self._historyPanel.append_modification(mod)
+        self._timeline.append_modification(mod)
         self._updateUndoRedo()
         self._updateTriangleCount()
 
-    # -- Context-menu handlers (tag provided by tree signals) ----------------
+    # ── Context-menu handlers (tag provided by tree signals) ────────
 
     def _onDuplicateTag(self, tag: int):
         if self._document is None:
@@ -762,7 +847,6 @@ class MainWindow(QMainWindow):
         self._fullRefresh()
 
     def _onHistoryJump(self, target: int):
-        """Jump to a specific history position via successive undo/redo."""
         if self._document is None:
             return
         current = self._document.history.cursor
@@ -777,20 +861,31 @@ class MainWindow(QMainWindow):
     def _fullRefresh(self):
         self._viewer.refresh_all()
         self._componentTree.rebuild()
-        self._historyPanel.rebuild()
+        self._timeline.rebuild()
         self._updateUndoRedo()
         self._updateTriangleCount()
+        # Update properties panel for current selection
+        tag = self._selectedTag()
+        if tag is not None and self._document:
+            comp = self._document.component_by_tag(tag)
+            self._propertiesPanel.set_component(comp)
+        else:
+            self._propertiesPanel.clear()
 
     # ====================================================================
     # Selection / picking
     # ====================================================================
 
     def _onSelectionChanged(self, tag: int):
-        """Tree selection changed — could highlight in viewer in the future."""
-        pass
+        """Tree selection changed — highlight in viewer and update properties."""
+        self._viewer.select_component(tag)
+        if self._document:
+            comp = self._document.component_by_tag(tag)
+            self._propertiesPanel.set_component(comp)
 
     def _onViewerPick(self, tag: int):
-        """3D viewer pick — could select in tree in the future."""
+        """3D viewer pick — select in tree and update properties."""
+        # TODO: map picked actor back to tag
         pass
 
     # ====================================================================
@@ -801,10 +896,11 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, 'About BaramEditor',
             '<h3>BaramEditor</h3>'
-            '<p>A CAD component viewer and editor.</p>'
-            '<p>Load STEP / IGES files, toggle component visibility, '
-            'rename, recolour, delete/restore components, '
-            'and track all changes with full undo/redo history.</p>',
+            '<p>A professional CAD component viewer and editor.</p>'
+            '<p>Load STEP / IGES / BREP / STL files, add primitives, '
+            'perform boolean operations, transform components, '
+            'and track all changes with full undo/redo history.</p>'
+            '<p style="color: #888;">Fusion 360-style interface</p>',
         )
 
     # ====================================================================
@@ -814,7 +910,7 @@ class MainWindow(QMainWindow):
     async def start(self):
         """Called from main() after the event loop is running."""
         self.show()
-        self._viewer.apply_theme(app.settings.isDarkModeEnabled())
+        self._viewer.apply_theme(True)  # Default to dark mode for CAD
 
     def closeEvent(self, event):
         if self._document is not None and self._document.history.cursor > 0:
